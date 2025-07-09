@@ -1,6 +1,4 @@
 import numpy
-import matplotlib.pyplot as plt
-import cv2
 import scipy.interpolate
 import skimage.filters
 import skimage.morphology
@@ -11,8 +9,10 @@ from PIL import Image
 from fil_finder import FilFinder2D
 import astropy.units as u
 from tqdm import tqdm
+import pooch
+import utils.dataset
 import cv2
-import streamlit as st
+
 
 colourTableHex = {
                 'LAD':       "#f03b20",
@@ -34,10 +34,9 @@ for item in colourTableHex.keys():
 
 
 def skeletonise(maskArray):
-    
     # if len(maskArray.shape) == 3:
     maskArray = cv2.cvtColor(maskArray, cv2.COLOR_BGR2GRAY)
-    
+
     skeleton = skimage.morphology.skeletonize(maskArray.astype('bool'))
 
     # Process the skeleton and find the longest path
@@ -152,80 +151,104 @@ def skelSplinerWithThickness(skel, EDT, smoothing=50, order=3, decimation=2):
 
     return tcko
 
-@st.cache_resource 
-def arterySegmentation(slice_ix, pixelArray, groundTruthPoints, segmentationModel):
 
-        inputImage = pixelArray[slice_ix, :, :]
+def arterySegmentation(inputImage, groundTruthPoints, segmentationModelWeights=None):
+    """
+    Segment a single greyscale artery with a UNet model.
 
-        inputImage = cv2.resize(inputImage, (512,512))
+    Parameters
+    ----------
+        inputImage: 2D numpy array
+            Ideally this input is normalised 0-255 and 512x512
+            If a different size it is rescaled along with groundTruthPoints
 
-        imageSize = inputImage.shape
+        groundTruthPoints: Nx2 numpy array
+            Y and X positions of annotated points along the artery,
+            Ordering is not important except that start and end points should be top and bottom of the array
 
-        # Zip points together into tuples
-        groundTruthPoints = list(zip(groundTruthPoints['top'], groundTruthPoints['left']+3.5))
+        segmentationModelWeights: segmentation model weights (pth), optional
+            Segmentation model weights to use.
+            If not set the default ones from this paper: https://doi.org/10.1016/j.ijcard.2024.132598
 
-        n_classes = 2
+    Returns
+    -------
+        mask : 512x512 numpy array (int64)
+            Mask selecting the selected artery, 0 = background and 1 = artery
+    """
+    if segmentationModelWeights is None:
+        segmentationModelWeights = pooch.retrieve(
+            url="doi:10.5281/zenodo.13848135/modelWeights-InternalData-inceptionresnetv2-fold2-e40-b10-a4.pth",
+            known_hash="md5:bf893ef57adaf39cfee33b25c7c1d87b",
+        )
 
-        net = predict.smp.Unet(
-            encoder_name='inceptionresnetv2', encoder_weights="imagenet", in_channels=3, classes=n_classes)
+    if inputImage.shape[0] != 512 and inputImage.shape[1] != 512:
+        ratioYX = numpy.array([512./inputImage.shape[0], 512./inputImage.shape[1]])
+        print(f"arterySegmentation(): Rescaling image to 512x512 by {ratioYX=}, and also applying this to input points")
+        inputImage = scipy.ndimage.zoom(inputImage, ratioYX)
+        groundTruthPoints *= ratioYX
+        print(inputImage.shape)
 
-        net = predict.nn.DataParallel(net)
+    imageSize = inputImage.shape
 
-        device = predict.torch.device(
-            'cuda' if predict.torch.cuda.is_available() else 'cpu')
-        predict.logging.info(f'Using device {device}')
-        net.to(device=device)
+    n_classes = 2 # binary output
 
-        predict.cudnn.benchmark = True
+    net = predict.smp.Unet(
+        encoder_name='inceptionresnetv2',
+        encoder_weights="imagenet",
+        in_channels=3,
+        classes=n_classes
+    )
 
-        net.load_state_dict(predict.torch.load(
-            segmentationModel, map_location=device))
+    net = predict.nn.DataParallel(net)
 
-        predict.logging.info("Model loaded !")
+    device = predict.torch.device('cuda' if predict.torch.cuda.is_available() else 'cpu')
+    net.to(device=device)
 
-        orig_image = Image.fromarray(inputImage)
+    net.load_state_dict(
+        predict.torch.load(
+            segmentationModelWeights,
+            map_location=device
+        )
+    )
 
-        # w, h = orig_image.size
-        
-        image = predict.Image.new('RGB', imageSize, (0, 0, 0))
-        image.paste(orig_image, (0, 0))
+    orig_image = Image.fromarray(inputImage)
 
-        imageArray = numpy.array(image).astype('uint8')
+    image = predict.Image.new('RGB', imageSize, (0, 0, 0))
+    image.paste(orig_image, (0, 0))
 
-        # Clear last channels
-        imageArray[:, :, -1] = 0
-        imageArray[:, :, -2] = 0
+    imageArray = numpy.array(image).astype('uint8')
 
-        ## Get endpoints of skeleton
-        startPoint = groundTruthPoints[0]
-        endPoint = groundTruthPoints[-1]
+    # Clear last channels
+    imageArray[:, :, -1] = 0
+    imageArray[:, :, -2] = 0
 
-        for point in [startPoint, endPoint]:
-            y = int(point[0])
-            x = int(point[1])
+    ## Get endpoints of skeleton
+    startPoint = groundTruthPoints[0]
+    endPoint = groundTruthPoints[-1]
 
-            imageArray[y-2:y+2, x-2:x+2, -2] = 255 
+    # End points on Channel 1
+    for y, x in [startPoint, endPoint]:
+        y = int(numpy.round(y))
+        x = int(numpy.round(x))
+        imageArray[y-2:y+2, x-2:x+2, 1] = 255
 
-        
-        for point in groundTruthPoints[2:-1]:
-            y = int(point[0])
-            x = int(point[1])
+    # All other points on Channel 2
+    for y, x in groundTruthPoints[1:-1]:
+        y = int(numpy.round(y))
+        x = int(numpy.round(x))
+        imageArray[y-2:y+ 2, x-2:x+2, 2] = 255
 
-            imageArray[y-2:y+ 2, x-2:x+2, -1] = 255
+    image = Image.fromarray(imageArray.astype(numpy.uint8))
 
-        # path = f"{outputPath}{selectedArtery}-groundTruthPoints.npy"
+    mask = predict.predict_img(
+        net=net,
+        dataset_class=utils.dataset.CoronaryDataset,
+        full_img=image,
+        scale_factor=1,
+        device=device
+    )
 
-        # numpy.save(path, arr=numpy.array(groundTruthPoints))
-
-        image = Image.fromarray(imageArray.astype(numpy.uint8))
-
-        mask = predict.predict_img(net=net, dataset_class=predict.CoronaryDataset,
-                                full_img=image, scale_factor=1, device=device)
-        result = predict.CoronaryDataset.mask2image(mask)
-        result = result.crop((0, 0, imageSize[0], imageSize[1]))
-        resultsArray = numpy.asarray(result)
-
-        return resultsArray
+    return mask
 
 
 
