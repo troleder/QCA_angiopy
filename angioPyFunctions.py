@@ -1,6 +1,4 @@
 import numpy
-import matplotlib.pyplot as plt
-import cv2
 import scipy.interpolate
 import skimage.filters
 import skimage.morphology
@@ -13,6 +11,7 @@ import astropy.units as u
 from tqdm import tqdm
 import pooch
 import utils.dataset
+import cv2
 
 
 colourTableHex = {
@@ -37,7 +36,7 @@ for item in colourTableHex.keys():
 def skeletonise(maskArray):
     # if len(maskArray.shape) == 3:
     maskArray = cv2.cvtColor(maskArray, cv2.COLOR_BGR2GRAY)
-    
+
     skeleton = skimage.morphology.skeletonize(maskArray.astype('bool'))
 
     # Process the skeleton and find the longest path
@@ -152,12 +151,29 @@ def skelSplinerWithThickness(skel, EDT, smoothing=50, order=3, decimation=2):
 
     return tcko
 
+
 def arterySegmentation(inputImage, groundTruthPoints, segmentationModelWeights=None):
     """
     Segment a single greyscale artery with a UNet model.
 
     Parameters
     ----------
+        inputImage: 2D numpy array
+            Ideally this input is normalised 0-255 and 512x512
+            If a different size it is rescaled along with groundTruthPoints
+
+        groundTruthPoints: Nx2 numpy array
+            Y and X positions of annotated points along the artery,
+            Ordering is not important except that start and end points should be top and bottom of the array
+
+        segmentationModelWeights: segmentation model weights (pth), optional
+            Segmentation model weights to use.
+            If not set the default ones from this paper: https://doi.org/10.1016/j.ijcard.2024.132598
+
+    Returns
+    -------
+        mask : 512x512 numpy array (int64)
+            Mask selecting the selected artery, 0 = background and 1 = artery
     """
     if segmentationModelWeights is None:
         segmentationModelWeights = pooch.retrieve(
@@ -165,11 +181,16 @@ def arterySegmentation(inputImage, groundTruthPoints, segmentationModelWeights=N
             known_hash="md5:bf893ef57adaf39cfee33b25c7c1d87b",
         )
 
-    inputImage = cv2.resize(inputImage, (512,512))
+    if inputImage.shape[0] != 512 and inputImage.shape[1] != 512:
+        ratioYX = numpy.array([512./inputImage.shape[0], 512./inputImage.shape[1]])
+        print(f"arterySegmentation(): Rescaling image to 512x512 by {ratioYX=}, and also applying this to input points")
+        inputImage = scipy.ndimage.zoom(inputImage, ratioYX)
+        groundTruthPoints *= ratioYX
+        print(inputImage.shape)
 
     imageSize = inputImage.shape
 
-    n_classes = 2
+    n_classes = 2 # binary output
 
     net = predict.smp.Unet(
         encoder_name='inceptionresnetv2',
@@ -181,10 +202,7 @@ def arterySegmentation(inputImage, groundTruthPoints, segmentationModelWeights=N
     net = predict.nn.DataParallel(net)
 
     device = predict.torch.device('cuda' if predict.torch.cuda.is_available() else 'cpu')
-    # predict.logging.info(f'Using device {device}')
     net.to(device=device)
-
-    # predict.cudnn.benchmark = True
 
     net.load_state_dict(
         predict.torch.load(
@@ -192,8 +210,6 @@ def arterySegmentation(inputImage, groundTruthPoints, segmentationModelWeights=N
             map_location=device
         )
     )
-
-    # predict.logging.info("Model loaded !")
 
     orig_image = Image.fromarray(inputImage)
 
@@ -231,6 +247,7 @@ def arterySegmentation(inputImage, groundTruthPoints, segmentationModelWeights=N
         scale_factor=1,
         device=device
     )
+
     return mask
 
 

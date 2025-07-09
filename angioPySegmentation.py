@@ -211,7 +211,7 @@ if selectedDicom is not None:
                             groundTruthPoints = numpy.vstack(
                                 (
                                     numpy.array(objects['top']),
-                                    numpy.array(objects['left']+3.5)
+                                    numpy.array(objects['left']+3.5) # compensate for some streamlit offset or something
                                 )
                             ).T
 
