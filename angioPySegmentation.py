@@ -22,7 +22,6 @@ import scipy
 import cv2
 
 import ssl
-import pooch
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
@@ -31,11 +30,6 @@ st.set_page_config(page_title="AngioPy Segmentation", layout="wide")
 if 'stage' not in st.session_state:
     st.session_state.stage = 0
 
-
-segmentationModelWeights = pooch.retrieve(
-    url="doi:10.5281/zenodo.13848135/modelWeights-InternalData-inceptionresnetv2-fold2-e40-b10-a4.pth",
-    known_hash="md5:bf893ef57adaf39cfee33b25c7c1d87b",
-)
 
 
 # Make output folder
@@ -221,11 +215,13 @@ if selectedDicom is not None:
                                 )
                             ).T
 
-                            predictedMask = angioPyFunctions.arterySegmentation(
+                            mask = angioPyFunctions.arterySegmentation(
                                 pixelArray[slice_ix],
                                 groundTruthPoints,
-                                segmentationModelWeights
                             )
+                            predictedMask = predict.CoronaryDataset.mask2image(mask)
+                            # predictedMask = predictedMask.crop((0, 0, imageSize[0], imageSize[1]))
+                            predictedMask = numpy.asarray(predictedMask)
 
             with col2:
                 col2a, col2b, col2c = st.columns((1,10,1))

@@ -11,8 +11,9 @@ from PIL import Image
 from fil_finder import FilFinder2D
 import astropy.units as u
 from tqdm import tqdm
-import cv2
-import streamlit as st
+import pooch
+import utils.dataset
+
 
 colourTableHex = {
                 'LAD':       "#f03b20",
@@ -34,7 +35,6 @@ for item in colourTableHex.keys():
 
 
 def skeletonise(maskArray):
-    
     # if len(maskArray.shape) == 3:
     maskArray = cv2.cvtColor(maskArray, cv2.COLOR_BGR2GRAY)
     
@@ -152,76 +152,86 @@ def skelSplinerWithThickness(skel, EDT, smoothing=50, order=3, decimation=2):
 
     return tcko
 
-@st.cache_resource
-def arterySegmentation(inputImage, groundTruthPoints, segmentationModel):
-        inputImage = cv2.resize(inputImage, (512,512))
+def arterySegmentation(inputImage, groundTruthPoints, segmentationModelWeights=None):
+    """
+    Segment a single greyscale artery with a UNet model.
 
-        imageSize = inputImage.shape
+    Parameters
+    ----------
+    """
+    if segmentationModelWeights is None:
+        segmentationModelWeights = pooch.retrieve(
+            url="doi:10.5281/zenodo.13848135/modelWeights-InternalData-inceptionresnetv2-fold2-e40-b10-a4.pth",
+            known_hash="md5:bf893ef57adaf39cfee33b25c7c1d87b",
+        )
 
-        # Zip points together into tuples
-        # groundTruthPoints = list(zip(groundTruthPoints['top'], groundTruthPoints['left']+3.5))
-        # groundTruthPoints = [(y, x + 3.5) for y, x in groundTruthPoints]
+    inputImage = cv2.resize(inputImage, (512,512))
 
-        n_classes = 2
+    imageSize = inputImage.shape
 
-        net = predict.smp.Unet(
-            encoder_name='inceptionresnetv2', encoder_weights="imagenet", in_channels=3, classes=n_classes)
+    n_classes = 2
 
-        net = predict.nn.DataParallel(net)
+    net = predict.smp.Unet(
+        encoder_name='inceptionresnetv2',
+        encoder_weights="imagenet",
+        in_channels=3,
+        classes=n_classes
+    )
 
-        device = predict.torch.device(
-            'cuda' if predict.torch.cuda.is_available() else 'cpu')
-        predict.logging.info(f'Using device {device}')
-        net.to(device=device)
+    net = predict.nn.DataParallel(net)
 
-        predict.cudnn.benchmark = True
+    device = predict.torch.device('cuda' if predict.torch.cuda.is_available() else 'cpu')
+    # predict.logging.info(f'Using device {device}')
+    net.to(device=device)
 
-        net.load_state_dict(predict.torch.load(
-            segmentationModel, map_location=device))
+    # predict.cudnn.benchmark = True
 
-        predict.logging.info("Model loaded !")
+    net.load_state_dict(
+        predict.torch.load(
+            segmentationModelWeights,
+            map_location=device
+        )
+    )
 
-        orig_image = Image.fromarray(inputImage)
+    # predict.logging.info("Model loaded !")
 
-        image = predict.Image.new('RGB', imageSize, (0, 0, 0))
-        image.paste(orig_image, (0, 0))
+    orig_image = Image.fromarray(inputImage)
 
-        imageArray = numpy.array(image).astype('uint8')
+    image = predict.Image.new('RGB', imageSize, (0, 0, 0))
+    image.paste(orig_image, (0, 0))
 
-        # Clear last channels
-        imageArray[:, :, -1] = 0
-        imageArray[:, :, -2] = 0
+    imageArray = numpy.array(image).astype('uint8')
 
-        ## Get endpoints of skeleton
-        startPoint = groundTruthPoints[0]
-        endPoint = groundTruthPoints[-1]
+    # Clear last channels
+    imageArray[:, :, -1] = 0
+    imageArray[:, :, -2] = 0
 
-        for point in [startPoint, endPoint]:
-            y = int(point[0])
-            x = int(point[1])
+    ## Get endpoints of skeleton
+    startPoint = groundTruthPoints[0]
+    endPoint = groundTruthPoints[-1]
 
-            imageArray[y-2:y+2, x-2:x+2, -2] = 255 
+    # End points on Channel 1
+    for y, x in [startPoint, endPoint]:
+        y = int(numpy.round(y))
+        x = int(numpy.round(x))
+        imageArray[y-2:y+2, x-2:x+2, 1] = 255
 
+    # All other points on Channel 2
+    for y, x in groundTruthPoints[1:-1]:
+        y = int(numpy.round(y))
+        x = int(numpy.round(x))
+        imageArray[y-2:y+ 2, x-2:x+2, 2] = 255
 
-        for point in groundTruthPoints[1:-1]:
-            y = int(point[0])
-            x = int(point[1])
+    image = Image.fromarray(imageArray.astype(numpy.uint8))
 
-            imageArray[y-2:y+ 2, x-2:x+2, -1] = 255
-
-        # path = f"{outputPath}{selectedArtery}-groundTruthPoints.npy"
-
-        # numpy.save(path, arr=numpy.array(groundTruthPoints))
-
-        image = Image.fromarray(imageArray.astype(numpy.uint8))
-
-        mask = predict.predict_img(net=net, dataset_class=predict.CoronaryDataset,
-                                full_img=image, scale_factor=1, device=device)
-        result = predict.CoronaryDataset.mask2image(mask)
-        result = result.crop((0, 0, imageSize[0], imageSize[1]))
-        resultsArray = numpy.asarray(result)
-
-        return resultsArray
+    mask = predict.predict_img(
+        net=net,
+        dataset_class=utils.dataset.CoronaryDataset,
+        full_img=image,
+        scale_factor=1,
+        device=device
+    )
+    return mask
 
 
 
