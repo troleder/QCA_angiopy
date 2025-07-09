@@ -214,16 +214,18 @@ if selectedDicom is not None:
                             for col in objects.select_dtypes(include=['object']).columns:
                                 objects[col] = objects[col].astype("str")
 
-                            # Run segmentation model on the selected from, and the chosen groundtruth points
-                            predictedMask = angioPyFunctions.arterySegmentation(
-                                slice_ix=slice_ix,
-                                pixelArray=pixelArray,
-                                groundTruthPoints = objects[['top', 'left']],
-                                segmentationModel=segmentationModelWeights
-                            )
+                            groundTruthPoints = numpy.vstack(
+                                (
+                                    numpy.array(objects['top']),
+                                    numpy.array(objects['left']+3.5)
+                                )
+                            ).T
 
-                            # Save the predicted mask
-                            # tifffile.imwrite(f"{outputPath}/mask.tif", predictedMask)
+                            predictedMask = angioPyFunctions.arterySegmentation(
+                                pixelArray[slice_ix],
+                                groundTruthPoints,
+                                segmentationModelWeights
+                            )
 
             with col2:
                 col2a, col2b, col2c = st.columns((1,10,1))

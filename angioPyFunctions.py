@@ -152,17 +152,15 @@ def skelSplinerWithThickness(skel, EDT, smoothing=50, order=3, decimation=2):
 
     return tcko
 
-@st.cache_resource 
-def arterySegmentation(slice_ix, pixelArray, groundTruthPoints, segmentationModel):
-
-        inputImage = pixelArray[slice_ix, :, :]
-
+@st.cache_resource
+def arterySegmentation(inputImage, groundTruthPoints, segmentationModel):
         inputImage = cv2.resize(inputImage, (512,512))
 
         imageSize = inputImage.shape
 
         # Zip points together into tuples
-        groundTruthPoints = list(zip(groundTruthPoints['top'], groundTruthPoints['left']+3.5))
+        # groundTruthPoints = list(zip(groundTruthPoints['top'], groundTruthPoints['left']+3.5))
+        # groundTruthPoints = [(y, x + 3.5) for y, x in groundTruthPoints]
 
         n_classes = 2
 
@@ -185,8 +183,6 @@ def arterySegmentation(slice_ix, pixelArray, groundTruthPoints, segmentationMode
 
         orig_image = Image.fromarray(inputImage)
 
-        # w, h = orig_image.size
-        
         image = predict.Image.new('RGB', imageSize, (0, 0, 0))
         image.paste(orig_image, (0, 0))
 
@@ -206,8 +202,8 @@ def arterySegmentation(slice_ix, pixelArray, groundTruthPoints, segmentationMode
 
             imageArray[y-2:y+2, x-2:x+2, -2] = 255 
 
-        
-        for point in groundTruthPoints[2:-1]:
+
+        for point in groundTruthPoints[1:-1]:
             y = int(point[0])
             x = int(point[1])
 
