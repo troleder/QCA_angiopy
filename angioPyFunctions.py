@@ -185,8 +185,10 @@ def arterySegmentation(inputImage, groundTruthPoints, segmentationModelWeights=N
         ratioYX = numpy.array([512./inputImage.shape[0], 512./inputImage.shape[1]])
         print(f"arterySegmentation(): Rescaling image to 512x512 by {ratioYX=}, and also applying this to input points")
         inputImage = scipy.ndimage.zoom(inputImage, ratioYX)
-        groundTruthPoints *= ratioYX
+        points = groundTruthPoints.copy() * ratioYX
         print(inputImage.shape)
+    else:
+        points = groundTruthPoints
 
     imageSize = inputImage.shape
 
