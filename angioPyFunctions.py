@@ -225,8 +225,8 @@ def arterySegmentation(inputImage, groundTruthPoints, segmentationModelWeights=N
     imageArray[:, :, -2] = 0
 
     ## Get endpoints of skeleton
-    startPoint = groundTruthPoints[0]
-    endPoint = groundTruthPoints[-1]
+    startPoint = points[0]
+    endPoint = points[-1]
 
     # End points on Channel 1
     for y, x in [startPoint, endPoint]:
@@ -235,7 +235,7 @@ def arterySegmentation(inputImage, groundTruthPoints, segmentationModelWeights=N
         imageArray[y-2:y+2, x-2:x+2, 1] = 255
 
     # All other points on Channel 2
-    for y, x in groundTruthPoints[1:-1]:
+    for y, x in points[1:-1]:
         y = int(numpy.round(y))
         x = int(numpy.round(x))
         imageArray[y-2:y+ 2, x-2:x+2, 2] = 255
