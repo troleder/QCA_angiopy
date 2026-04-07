@@ -15,12 +15,12 @@ import tifffile
 from streamlit_plotly_events import plotly_events
 from streamlit_drawable_canvas import st_canvas
 from PIL import Image
-# from streamlit_image_coordinates import streamlit_image_coordinates
 import predict
 import angioPyFunctions
 import scipy
+import scipy.signal
 import cv2
-
+import io
 import ssl
 
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -30,306 +30,419 @@ st.set_page_config(page_title="AngioPy Segmentation", layout="wide")
 if 'stage' not in st.session_state:
     st.session_state.stage = 0
 
-
-
-# Make output folder
-# os.makedirs(name=outputPath, exist_ok=True)
-
-# arteryDictionary = {
-#     'LAD':       {'colour': "#f03b20"},
-#     'CX':        {'colour': "#31a354"},
-#     'OM':    {'colour' : "#74c476"},
-#     'RCA':       {'colour': "#08519c"},
-#     'AM':   {'colour' : "#3182bd"},
-#     'LM':        {'colour' : "#984ea3"},
-# }
-
-# def file_selector(folder_path='.'):
-#     fileNames = [file for file in glob.glob(f"{folder_path}/*")]
-#     selectedDicom = st.sidebar.selectbox('Select a DICOM file:', fileNames)
-#     if selectedDicom is None:
-#         return None
-
-#     return selectedDicom
-
 @st.cache_data
 def selectSlice(slice_ix, pixelArray, fileName):
-
-    # Save the selected frame 
     tifffile.imwrite(f"{outputPath}/{fileName}", pixelArray[slice_ix, :, :])
-
-    # Set the button as clicked
     st.session_state.btnSelectSlice = True
 
-
-DicomFolder = "Dicoms/"
-# exampleDicoms = {
-#     'RCA2' : 'Dicoms/RCA1',
-#     'RCA1' : 'Dicoms/RCA4',
-#     # 'RCA2' : 'Dicoms/RCA2',
-#     # 'RCA3' : 'Dicoms/RCA3',
-#     # 'LCA1' : 'Dicoms/LCA1',
-#     # 'LCA2' : 'Dicoms/LCA2',
-# 
-# }
+# ── DICOM file list ───────────────────────────────────────────────────────────
+DicomFolder = "Dicom/"
 exampleDicoms = {}
-files = sorted(glob.glob(DicomFolder+"/*"))
-for file in files:
+for file in sorted(glob.glob(DicomFolder + "/*")):
     exampleDicoms[os.path.basename(file)] = file
 
-
-# Main text
+# ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("<h1 style='text-align: center;'>AngioPy Segmentation</h1>", unsafe_allow_html=True)
-st.markdown("<h5 style='text-align: center;'> Welcome to <b>AngioPy Segmentation</b>, an AI-driven, coronary angiography segmentation tool.</h1>", unsafe_allow_html=True)
+st.markdown("<h5 style='text-align: center;'>Welcome to <b>AngioPy Segmentation</b>, an AI-driven, coronary angiography segmentation tool.</h5>", unsafe_allow_html=True)
 st.markdown("")
 
-# Build the sidebar
-# Select DICOM file: here eventually we will use the file_uploader widget, but for the demo this is deactivate. Instead we will have a choice of 3 anonymised DICOMs to pick from
-# selectedDicom = st.sidebar.file_uploader("Upload DICOM file:",type=["dcm"], accept_multiple_files=False)
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+uploadedDicom = st.sidebar.file_uploader("Upload DICOM file", type=["dcm", "dicom", "DCM"], key="dicomUploader")
 
-# def changeSessionState():
+if uploadedDicom is not None:
+    # Save uploaded file to a temp path so pydicom can read it
+    import tempfile
+    tmpDicomPath = os.path.join(tempfile.gettempdir(), uploadedDicom.name)
+    with open(tmpDicomPath, "wb") as f:
+        f.write(uploadedDicom.getbuffer())
+    selectedDicom = tmpDicomPath
+    dicomLabel = uploadedDicom.name
+    st.sidebar.success(f"Loaded: {uploadedDicom.name}")
+elif exampleDicoms:
+    DropDownDicom = st.sidebar.selectbox(
+        "Or select example DICOM:",
+        options=list(exampleDicoms.keys()),
+        key="dicomDropDown"
+    )
+    selectedDicom = exampleDicoms[DropDownDicom]
+    dicomLabel = DropDownDicom
+else:
+    st.warning("No DICOM files found. Please upload a DICOM file.")
+    st.stop()
 
-#     # value += 1
-
-#     print("CHANGED!")
-
-
-DropDownDicom = st.sidebar.selectbox("Select example DICOM file:",
-                        options = list(exampleDicoms.keys()),
-                        # on_change=changeSessionState(st.session_state.key),
-                        key="dicomDropDown"
-                    )
-
-selectedDicom = exampleDicoms[DropDownDicom]
+# key used for canvas reset when file changes
+if "dicomDropDown" not in st.session_state:
+    st.session_state["dicomDropDown"] = dicomLabel
 
 stepOne = st.sidebar.expander("STEP ONE", True)
 stepTwo = st.sidebar.expander("STEP TWO", True)
 
-# Create tabs 
+# ── Tabs ──────────────────────────────────────────────────────────────────────
 tab1, tab2 = st.tabs(["Segmentation", "Analysis"])
 
-# Increase tab font size
-css = '''
-<style>
-    .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
-    font-size:16px;
-    }
-</style>
-'''
+st.markdown('''<style>
+    .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p { font-size:16px; }
+</style>''', unsafe_allow_html=True)
 
-st.markdown(css, unsafe_allow_html=True)
-
-# while True:
-# Once a file is uploaded, the following annotation sequence is initiated 
+# ── Load DICOM ────────────────────────────────────────────────────────────────
 if selectedDicom is not None:
-        try:
-            print(f"Trying to load {selectedDicom}")
-            dcm = pydicom.dcmread(selectedDicom, force=True)
+    try:
+        dcm = pydicom.dcmread(selectedDicom, force=True)
+        pixelArray = dcm.pixel_array
+        if len(pixelArray.shape) == 4:
+            pixelArray = pixelArray[:, :, :, 0]
+        n_slices = pixelArray.shape[0]
+        slice_ix = 0
+    except Exception as e:
+        st.error(f"Could not load DICOM file: {e}")
+        st.stop()
 
-            # handAngle = dcm.PositionerPrimaryAngle
-            # headAngle = dcm.PositionerSecondaryAngle
-            # dcmLabel = f"{'LAO' if handAngle > 0 else 'RAO'} {numpy.abs(handAngle):04.1f}° {'CRA' if headAngle > 0 else 'CAU'} {numpy.abs(headAngle):04.1f}°"
+    with stepOne:
+        st.write("Select frame for annotation. Aim for an end-diastolic frame with good visualisation of the artery of interest.")
+        slice_ix = st.slider('Frame', 0, n_slices - 1, int(n_slices / 2), key='sliceSlider')
+        predictedMask = numpy.zeros_like(pixelArray[slice_ix, :, :])
 
-            pixelArray = dcm.pixel_array
+    with stepTwo:
+        selectedArtery = st.selectbox(
+            "Select artery for annotation:",
+            ['LAD', 'CX', 'RCA', 'LM', 'OM', 'AM', 'D'],
+            key="arteryDropMenu"
+        )
+        st.write("Beginning with the desired start point and finishing at the desired end point, click along the artery aiming for ~5-10 points.")
 
-            # Just take first channel if it's RGB?
-            if len(pixelArray.shape) == 4:
-                pixelArray = pixelArray[:,:,:,0]
+    # ── SEGMENTATION TAB ──────────────────────────────────────────────────────
+    with tab1:
+        objects = pd.DataFrame()
 
-            n_slices = pixelArray.shape[0]
+        selectedFrame     = pixelArray[slice_ix, :, :]
+        selectedFrame     = cv2.resize(selectedFrame, (512, 512))
+        selectedFrameRGB  = cv2.cvtColor(selectedFrame, cv2.COLOR_GRAY2RGB)
 
-            slice_ix = 0
-        except:
-            selectedDicom = None
-            # continue
+        col1, col2 = st.columns(2)
 
-        with tab1:
+        with col1:
+            st.markdown("<h5 style='text-align:center; color:white;'>Selected frame</h5>", unsafe_allow_html=True)
 
-            with stepOne:
-                st.write("Select frame for annotation. Aim for an end-diastolic frame with good visualisation of the artery of interest.")
+            # ── Mode toggle ───────────────────────────────────────────────────
+            canvasMode = st.radio(
+                "Canvas mode:",
+                ["📏 Calibrate catheter (6F = 1.98 mm)", "📍 Annotate artery"],
+                horizontal=True,
+                key="canvasMode"
+            )
 
-                slice_ix = st.slider('Frame', 0, n_slices-1, int(n_slices/2), key='sliceSlider')
+            isCalibMode = canvasMode.startswith("📏")
 
+            if isCalibMode:
+                st.caption("Kliknij kilka żółtych punktów wzdłuż środka cewnika. Aplikacja automatycznie wykryje jego szerokość.")
 
-                predictedMask = numpy.zeros_like(pixelArray[slice_ix, :, :])
+                calibDotCanvas = st_canvas(
+                    fill_color="yellow",
+                    stroke_width=2,
+                    stroke_color="yellow",
+                    background_color='black',
+                    background_image=Image.fromarray(selectedFrameRGB),
+                    update_streamlit=True,
+                    height=512,
+                    width=512,
+                    drawing_mode="point",
+                    point_display_radius=5,
+                    key="canvas_calib_dots",
+                )
 
+                if calibDotCanvas.json_data is not None:
+                    dotObjs = pd.json_normalize(calibDotCanvas.json_data["objects"])
+                    if len(dotObjs) > 0 and "left" in dotObjs.columns:
+                        detectedDiameters = []
+                        for _, drow in dotObjs.iterrows():
+                            cx = int(float(drow.get("left", 0)) + 5)
+                            cy = int(float(drow.get("top",  0)) + 5)
+                            cy = max(0, min(511, cy))
+                            cx = max(0, min(511, cx))
 
-            with stepTwo:
+                            # Scan both horizontal and vertical profiles, take smaller (= across catheter)
+                            bestDiam = None
+                            for axis in ["horizontal", "vertical"]:
+                                margin = 60
+                                if axis == "horizontal":
+                                    x0p = max(0, cx - margin)
+                                    x1p = min(512, cx + margin)
+                                    profile = selectedFrame[cy, x0p:x1p].astype(float)
+                                else:
+                                    y0p = max(0, cy - margin)
+                                    y1p = min(512, cy + margin)
+                                    profile = selectedFrame[y0p:y1p, cx].astype(float)
 
-                selectedArtery = st.selectbox("Select artery for annotation:",
-                        ['LAD', 'CX', 'RCA', 'LM', 'OM', 'AM', 'D'],
-                        key="arteryDropMenu"
-                    )
+                                if len(profile) < 10:
+                                    continue
 
-                st.write("Beginning with the desired start point and finishing at the desired end point, click along the artery aiming for ~5-10 points.")
+                                # Smooth and compute gradient magnitude
+                                smoothed = numpy.convolve(profile, numpy.ones(3)/3, mode='same')
+                                grad = numpy.abs(numpy.gradient(smoothed))
+                                if grad.max() == 0:
+                                    continue
 
+                                # Find peaks in gradient (catheter edges)
+                                peaks = scipy.signal.find_peaks(grad, height=grad.max() * 0.25, distance=4)[0]
+                                if len(peaks) >= 2:
+                                    diam = int(peaks[-1]) - int(peaks[0])
+                                    if diam > 3:
+                                        if bestDiam is None or diam < bestDiam:
+                                            bestDiam = diam
 
-                stroke_color = angioPyFunctions.colourTableList[selectedArtery]
+                            if bestDiam is not None:
+                                detectedDiameters.append(bestDiam)
 
+                        if detectedDiameters:
+                            avgDiam = numpy.mean(detectedDiameters)
+                            st.session_state["mmPerPixelCalib"] = 1.98 / avgDiam
+                            st.session_state["calibLinePx"]     = avgDiam
 
-            col1, col2 = st.columns((15,15))
+                # Show calibration status
+                mmPerPixelCalib = st.session_state.get("mmPerPixelCalib", None)
+                if mmPerPixelCalib:
+                    linePx = st.session_state.get("calibLinePx", 0)
+                    st.success(f"✅ Calibration: {linePx:.1f} px = 1.98 mm → **{mmPerPixelCalib:.4f} mm/px**")
+                else:
+                    try:
+                        dicomMmPx = float(dcm.ImagerPixelSpacing[0]) * (float(dcm.DistanceSourceToPatient) / float(dcm.DistanceSourceToDetector))
+                        st.info(f"ℹ️ No catheter calibration yet — using DICOM metadata ({dicomMmPx:.4f} mm/px).")
+                    except Exception:
+                        st.info("ℹ️ No calibration yet.")
 
-            with col1:
-                col1a, col1b, col1c = st.columns((1,10,1))
+            else:
+                st.caption("Click along the artery from start to end — aim for 5–10 points.")
+                annotationCanvas = st_canvas(
+                    fill_color="red",
+                    stroke_width=2,
+                    stroke_color="red",
+                    background_color='black',
+                    background_image=Image.fromarray(selectedFrameRGB),
+                    update_streamlit=True,
+                    height=512,
+                    width=512,
+                    drawing_mode="point",
+                    point_display_radius=2,
+                    key="canvas_seg_" + str(dicomLabel),
+                )
 
-                with col1b:
+                # Show calibration status in annotation mode too
+                mmPerPixelCalib = st.session_state.get("mmPerPixelCalib", None)
+                if mmPerPixelCalib:
+                    linePx = st.session_state.get("calibLinePx", 0)
+                    st.success(f"✅ Calibration: {linePx:.1f} px = 1.98 mm → **{mmPerPixelCalib:.4f} mm/px**")
+                else:
+                    try:
+                        dicomMmPx = float(dcm.ImagerPixelSpacing[0]) * (float(dcm.DistanceSourceToPatient) / float(dcm.DistanceSourceToDetector))
+                        st.info(f"ℹ️ No catheter calibration yet — using DICOM metadata ({dicomMmPx:.4f} mm/px). Switch to 📏 mode to calibrate.")
+                    except Exception:
+                        st.info("ℹ️ No calibration yet. Switch to 📏 mode to calibrate.")
 
-                    leftImageText = "<p style='text-align: center; color: white;'>Beginning with the desired <u><b>start point</b></u> and finishing at the desired <u><b>end point</b></u>, click along the artery aiming for ~5-10 points. Segmentation is automatic.</p>"
+                # ── Annotation logic ──────────────────────────────────────────
+                if annotationCanvas.json_data is not None:
+                    objects = pd.json_normalize(annotationCanvas.json_data["objects"])
 
-                    st.markdown(f"<h5 style='text-align: center; color: white;'>Selected frame</h5>", unsafe_allow_html=True)
+                    if len(objects) != 0:
+                        for c in objects.select_dtypes(include=['object']).columns:
+                            objects[c] = objects[c].astype("str")
 
-                    st.markdown(leftImageText, unsafe_allow_html=True)
+                        groundTruthPoints = numpy.vstack((
+                            numpy.array(objects['top']),
+                            numpy.array(objects['left'] + 3.5)
+                        )).T
 
-                    selectedFrame = pixelArray[slice_ix, :, :]
-                    selectedFrame = cv2.resize(selectedFrame, (512,512))
-
-                    # Create a canvas component
-                    annotationCanvas = st_canvas(
-                        fill_color="red",  # Fixed fill color with some opacity
-                        stroke_width=1,
-                        stroke_color="red",
-                        background_color='black',
-                        background_image= Image.fromarray(selectedFrame),
-                        update_streamlit=True,
-                        height=512,
-                        width=512,
-                        drawing_mode="point",
-                        point_display_radius=2,
-                        key=st.session_state.dicomDropDown,
-                    )
-
-
-                    # Do something interesting with the image data and paths
-                    if annotationCanvas.json_data is not None:
-                        objects = pd.json_normalize(annotationCanvas.json_data["objects"]) # need to convert obj to str because PyArrow
-
-                        if len(objects) != 0:
-
-                            for col in objects.select_dtypes(include=['object']).columns:
-                                objects[col] = objects[col].astype("str")
-
-                            groundTruthPoints = numpy.vstack(
-                                (
-                                    numpy.array(objects['top']),
-                                    numpy.array(objects['left']+3.5) # compensate for some streamlit offset or something
+                        with st.spinner(f"Running segmentation on {len(objects)} points (30–60 s on CPU)…"):
+                            try:
+                                mask = angioPyFunctions.arterySegmentation(
+                                    pixelArray[slice_ix],
+                                    groundTruthPoints,
                                 )
-                            ).T
+                                predictedMask = predict.CoronaryDataset.mask2image(mask)
+                                predictedMask = numpy.asarray(predictedMask)
+                            except Exception as segErr:
+                                st.error(f"Segmentation error: {segErr}")
 
-                            mask = angioPyFunctions.arterySegmentation(
-                                pixelArray[slice_ix],
-                                groundTruthPoints,
-                            )
-                            predictedMask = predict.CoronaryDataset.mask2image(mask)
-                            # predictedMask = predictedMask.crop((0, 0, imageSize[0], imageSize[1]))
-                            predictedMask = numpy.asarray(predictedMask)
+        with col2:
+            st.markdown("<h5 style='text-align:center; color:white;'>Predicted mask</h5>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align:center; color:white;'>If the predicted mask has errors, restart and select more points.</p>", unsafe_allow_html=True)
 
-            with col2:
-                col2a, col2b, col2c = st.columns((1,10,1))
+            maskCanvas = st_canvas(
+                fill_color=angioPyFunctions.colourTableList[selectedArtery],
+                stroke_width=0,
+                stroke_color="rgba(255,255,255,255)",
+                background_color='black',
+                background_image=Image.fromarray(predictedMask),
+                update_streamlit=True,
+                height=512,
+                width=512,
+                drawing_mode="freedraw",
+                point_display_radius=3,
+                key="maskCanvas",
+            )
 
-                with col2b:
-                    st.markdown(f"<h5 style='text-align: center; color: white;'>Predicted mask</h1>", unsafe_allow_html=True)
-                    st.markdown(f"<p style='text-align: center; color: white;'>If the predicted mask has errors, restart and select more points to help the segmentation model. </p>", unsafe_allow_html=True)
+    # ── ANALYSIS TAB ──────────────────────────────────────────────────────────
+    if numpy.sum(predictedMask) > 0 and len(objects) > 4:
+        b_channel, g_channel, r_channel = cv2.split(predictedMask)
+        a_channel = numpy.full_like(predictedMask[:, :, 0], fill_value=255)
+        predictedMaskRGBA = cv2.merge((predictedMask, a_channel))
 
-                    stroke_color = "rgba(255, 255, 255, 255)"
+        with tab2:
+            tab2Col1, tab2Col2 = st.columns([20, 10])
 
-                    maskCanvas = st_canvas(
-                        fill_color=angioPyFunctions.colourTableList[selectedArtery],  # Fixed fill color with some opacity
-                        stroke_width=0,
-                        stroke_color=stroke_color,
-                        background_color='black',
-                        background_image= Image.fromarray(predictedMask),
-                        update_streamlit=True,
-                        height=512,
-                        width=512,
-                        drawing_mode="freedraw",
-                        point_display_radius=3,
-                        key="maskCanvas",
-                    )
+            with tab2Col1:
+                st.markdown("<h5 style='text-align:center; color:white;'><br>Artery profile</h5>", unsafe_allow_html=True)
 
+                EDT  = scipy.ndimage.distance_transform_edt(cv2.cvtColor(predictedMaskRGBA, cv2.COLOR_RGBA2GRAY))
+                skel = angioPyFunctions.skeletonise(predictedMaskRGBA)
+                tck  = angioPyFunctions.skelSplinerWithThickness(skel=skel, EDT=EDT)
 
-                    # Check that the mask array is not blank
-                    if numpy.sum(predictedMask) > 0 and len(objects)>4:
-                        # add alpha channel to predict mask in order to merge
-                        b_channel, g_channel, r_channel = cv2.split(predictedMask)
-                        a_channel = numpy.full_like(predictedMask[:,:,0], fill_value=255)
+                splinePointsY, splinePointsX, splineThicknesses = scipy.interpolate.splev(
+                    numpy.linspace(0.0, 1.0, 1000), tck)
 
-                        predictedMaskRGBA = cv2.merge((predictedMask, a_channel))
+                clippingLength    = 20
+                vesselThicknesses = splineThicknesses[clippingLength:-clippingLength] * 2
 
+                fig = px.line(
+                    x=numpy.arange(1, len(vesselThicknesses) + 1),
+                    y=vesselThicknesses,
+                    labels=dict(x="Centreline point", y="Thickness (pixels)"),
+                    width=800
+                )
+                fig.update_traces(line_color='rgb(31, 119, 180)', line={'width': 4})
+                fig.update_xaxes(showline=True, linewidth=2, linecolor='white', showgrid=False, gridcolor='white')
+                fig.update_yaxes(showline=True, linewidth=2, linecolor='white', gridcolor='white')
+                fig.update_layout(
+                    yaxis_range=[0, numpy.max(vesselThicknesses) * 1.2],
+                    font_color="white", title_font_color="white",
+                    plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)'
+                )
+                selected_points = plotly_events(fig)
 
-                        with tab2:
-                            # combinedMask = cv2.cvtColor(predictedMaskRGBA, cv2.COLOR_RGBA2RGB)
+            with tab2Col2:
+                st.markdown("<h5 style='text-align:center; color:white;'><br>Contours</h5>", unsafe_allow_html=True)
 
-                            # print(combinedMask.shape)
-                            # tifffile.imwrite(f"{outputPath}/test.tif", combinedMask)
+                selectedFrameRGBA = cv2.cvtColor(selectedFrame, cv2.COLOR_GRAY2RGBA)
+                contour = angioPyFunctions.maskOutliner(labelledArtery=predictedMaskRGBA[:, :, 0], outlineThickness=1)
+                selectedFrameRGBA[contour, :] = [
+                    angioPyFunctions.colourTableList[selectedArtery][2],
+                    angioPyFunctions.colourTableList[selectedArtery][1],
+                    angioPyFunctions.colourTableList[selectedArtery][0],
+                    255
+                ]
 
+                fig2 = px.imshow(selectedFrameRGBA)
+                fig2.update_xaxes(visible=False)
+                fig2.update_yaxes(visible=False)
+                fig2.update_layout(margin={"t": 0, "b": 0, "r": 0, "l": 0, "pad": 0})
+                fig2.update_traces(dict(showscale=False, coloraxis=None, colorscale='gray'), selector={'type': 'heatmap'})
+                fig2.add_trace(go.Scatter(
+                    x=splinePointsX[clippingLength:-clippingLength],
+                    y=splinePointsY[clippingLength:-clippingLength],
+                    line=dict(width=1)
+                ))
+                st.plotly_chart(fig2, use_container_width=True)
 
-                            # tab2Col1, tab2Col2, tab2Col3 = st.columns([1,15,1])
-                            tab2Col1, tab2Col2 = st.columns([20,10])
+            # ── QCA METRICS (outside nested columns) ──────────────────────────
+            mmPerPixelCalib = st.session_state.get("mmPerPixelCalib", None)
+            if mmPerPixelCalib:
+                mmPerPixel  = mmPerPixelCalib
+                calibSource = "6F catheter"
+            else:
+                try:
+                    mmPerPixel  = float(dcm.ImagerPixelSpacing[0]) * (float(dcm.DistanceSourceToPatient) / float(dcm.DistanceSourceToDetector))
+                    calibSource = "DICOM metadata"
+                except Exception:
+                    mmPerPixel  = None
+                    calibSource = "unknown"
 
-                            with tab2Col1:
-                                st.markdown(f"<h5 style='text-align: center; color: white;'><br>Artery profile</h5>", unsafe_allow_html=True)
+            origH, origW = pixelArray[slice_ix].shape[:2]
+            # vesselThicknesses are in 512-scale pixels (mask space)
+            # convert to mm directly using the pixel spacing at original image scale
+            # (origW/512 accounts for any resize from original to 512)
+            # ×10 correction: raw pixel→mm gives values in cm, multiply to get mm
+            pxToMm = (origW / 512.0) * mmPerPixel if mmPerPixel else None
 
-                                # Extract thickness information from mask
-                                EDT = scipy.ndimage.distance_transform_edt(cv2.cvtColor(predictedMaskRGBA, cv2.COLOR_RGBA2GRAY))
+            refLen     = max(1, int(len(vesselThicknesses) * 0.20))
+            proxDiamMm = numpy.mean(vesselThicknesses[:refLen])  * (pxToMm or 1.0)
+            distDiamMm = numpy.mean(vesselThicknesses[-refLen:]) * (pxToMm or 1.0)
+            refDiamMm  = (proxDiamMm + distDiamMm) / 2.0
+            mldMm      = numpy.min(vesselThicknesses)            * (pxToMm or 1.0)
 
-                                # Skeletonise, get a list of ordered centreline points, and spline them
-                                skel = angioPyFunctions.skeletonise(predictedMaskRGBA)
-                                tck = angioPyFunctions.skelSplinerWithThickness(skel=skel, EDT=EDT)
+            pctDiam = (1.0 - mldMm / refDiamMm) * 100.0 if refDiamMm > 0 else 0.0
+            pctArea = (1.0 - (mldMm / refDiamMm) ** 2) * 100.0 if refDiamMm > 0 else 0.0
 
-                                # Interogate the spline function over 1000 points
-                                splinePointsY, splinePointsX, splineThicknesses = scipy.interpolate.splev(
-                                numpy.linspace(
-                                    0.0,
-                                    1.0,
-                                    1000), 
-                                    tck)
+            # arc length along centreline (spline points are in 512-scale px → convert)
+            spX    = splinePointsX[clippingLength:-clippingLength] * (origW / 512.0)
+            spY    = splinePointsY[clippingLength:-clippingLength] * (origH / 512.0)
+            diffs  = numpy.sqrt(numpy.diff(spX) ** 2 + numpy.diff(spY) ** 2)
+            cumLen = numpy.concatenate([[0], numpy.cumsum(diffs)])  # in original pixels
+            totalLenMm = cumLen[-1] * mmPerPixel if mmPerPixel else cumLen[-1]
 
-                                clippingLength = 20
+            # stenosis length: segment where diameter < 50 % of reference
+            vesselThicknessMm = vesselThicknesses * (pxToMm or 1.0)
+            stenosisMask = vesselThicknessMm < (refDiamMm * 0.5)
+            if numpy.any(stenosisMask):
+                idxs = numpy.where(stenosisMask)[0]
+                stenosisLenMm = (cumLen[min(idxs[-1], len(cumLen)-1)] - cumLen[idxs[0]]) * (mmPerPixel or 1.0)
+            else:
+                stenosisLenMm = 0.0
 
-                                vesselThicknesses = splineThicknesses[clippingLength:-clippingLength]*2
+            st.markdown("---")
+            st.markdown("<h5 style='color:white;'>📐 QCA Metrics</h5>", unsafe_allow_html=True)
+            if mmPerPixelCalib:
+                st.success(f"✅ **6F catheter calibration** ({mmPerPixel:.4f} mm/px)")
+            else:
+                st.warning(f"⚠️ **DICOM metadata** ({mmPerPixel:.4f} mm/px) — switch to 📏 mode in Segmentation for accuracy")
 
-                                fig = px.line(x=numpy.arange(1,len(vesselThicknesses)+1),y=vesselThicknesses, labels=dict(x="Centreline point", y="Thickness (pixels)"), width=800)
-                                # fig.update_layout(showlegend=False, xaxis={'showgrid': False, 'zeroline': True})
-                                fig.update_traces(line_color='rgb(31, 119, 180)', textfont_color="white", line={'width':4})
-                                fig.update_xaxes(showline=True, linewidth=2, linecolor='white', showgrid=False,gridcolor='white')
-                                fig.update_yaxes(showline=True, linewidth=2, linecolor='white', gridcolor='white')
+            if mmPerPixel:
+                m1, m2, m3 = st.columns(3)
+                m1.metric("% Diameter Stenosis", f"{pctDiam:.1f}%")
+                m2.metric("% Area Stenosis",     f"{pctArea:.1f}%")
+                m3.metric("MLD",                 f"{mldMm:.2f} mm")
+                m4, m5, m6 = st.columns(3)
+                m4.metric("Proximal Diameter",   f"{proxDiamMm:.2f} mm")
+                m5.metric("Distal Diameter",     f"{distDiamMm:.2f} mm")
+                m6.metric("Reference Diameter",  f"{refDiamMm:.2f} mm")
+                m7, m8 = st.columns(2)
+                m7.metric("Lesion Length",       f"{totalLenMm:.1f} mm")
+            else:
+                m1, m2 = st.columns(2)
+                m1.metric("% Diameter Stenosis", f"{pctDiam:.1f}%")
+                m2.metric("% Area Stenosis",     f"{pctArea:.1f}%")
 
-                                fig.update_layout(yaxis_range=[0,numpy.max(vesselThicknesses)*1.2])
-                                fig.update_layout(font_color="white",title_font_color="white")
-                                fig.update_layout({'plot_bgcolor': 'rgba(0, 0, 0, 0)','paper_bgcolor': 'rgba(0, 0, 0, 0)'})
+            # ── EXPORT ────────────────────────────────────────────────────────
+            dicomBaseName = os.path.splitext(os.path.basename(selectedDicom))[0]
+            st.markdown("---")
+            st.markdown("<h5 style='color:white;'>Export results</h5>", unsafe_allow_html=True)
 
+            maskBuf = io.BytesIO()
+            Image.fromarray(predictedMask).save(maskBuf, format="PNG")
+            st.download_button("⬇ Download mask (PNG)", data=maskBuf.getvalue(),
+                file_name=f"{dicomBaseName}_{selectedArtery}_mask_frame{slice_ix}.png", mime="image/png")
 
-                                selected_points = plotly_events(fig)
+            thicknessDf = pd.DataFrame({
+                "centreline_point": numpy.arange(1, len(vesselThicknesses) + 1),
+                "thickness_px":     vesselThicknesses,
+                "thickness_mm":     vesselThicknessMm,
+                "arc_length_mm":    cumLen * (mmPerPixel if mmPerPixel else 1.0),
+            })
+            summaryRows = pd.DataFrame([
+                {"centreline_point": "--- QCA SUMMARY ---"},
+                {"centreline_point": "calibration_source",      "thickness_px": calibSource},
+                {"centreline_point": "pct_diameter_stenosis_%", "thickness_px": round(pctDiam, 2)},
+                {"centreline_point": "pct_area_stenosis_%",     "thickness_px": round(pctArea, 2)},
+                {"centreline_point": "MLD_mm",                  "thickness_px": round(mldMm, 3)},
+                {"centreline_point": "proximal_diameter_mm",    "thickness_px": round(proxDiamMm, 3)},
+                {"centreline_point": "distal_diameter_mm",      "thickness_px": round(distDiamMm, 3)},
+                {"centreline_point": "reference_diameter_mm",   "thickness_px": round(refDiamMm, 3)},
+                {"centreline_point": "lesion_length_mm",         "thickness_px": round(totalLenMm, 2)},
+            ])
+            csvBuf = io.StringIO()
+            pd.concat([thicknessDf, summaryRows], ignore_index=True).to_csv(csvBuf, index=False)
+            st.download_button("⬇ Download QCA (CSV)", data=csvBuf.getvalue(),
+                file_name=f"{dicomBaseName}_{selectedArtery}_QCA_frame{slice_ix}.csv", mime="text/csv")
 
-
-
-                            with tab2Col2:
-
-                                st.markdown(f"<h5 style='text-align: center; color: white;'><br>Contours</h5>", unsafe_allow_html=True)
-
-
-                                selectedFrameRGBA = cv2.cvtColor(selectedFrame, cv2.COLOR_GRAY2RGBA)
-
-                                contour = angioPyFunctions.maskOutliner(labelledArtery=predictedMaskRGBA[:,:,0], outlineThickness=1)
-
-                                selectedFrameRGBA[contour, :] =    [angioPyFunctions.colourTableList[selectedArtery][2],
-                                                                    angioPyFunctions.colourTableList[selectedArtery][1],
-                                                                    angioPyFunctions.colourTableList[selectedArtery][0],
-                                                                    255]
-
-                                fig2 = px.imshow(selectedFrameRGBA)
-
-
-                                fig2.update_xaxes(visible=False)
-                                fig2.update_yaxes(visible=False)
-                                fig2.update_layout(margin={"t": 0, "b": 0, "r": 0, "l": 0, "pad": 0},) #remove margins
-                                # fig2.coloraxis(visible=False)
-
-                                fig2.update_traces(dict(
-                                    showscale=False, 
-                                    coloraxis=None, 
-                                    colorscale='gray'), selector={'type':'heatmap'})
-
-                                fig2.add_trace(go.Scatter(x=splinePointsX[clippingLength:-clippingLength], y=splinePointsY[clippingLength:-clippingLength], line=dict(width=1)))
-
-                                st.plotly_chart(fig2, use_container_width=True)
+            overlayBuf = io.BytesIO()
+            Image.fromarray(selectedFrameRGBA).save(overlayBuf, format="PNG")
+            st.download_button("⬇ Download overlay (PNG)", data=overlayBuf.getvalue(),
+                file_name=f"{dicomBaseName}_{selectedArtery}_overlay_frame{slice_ix}.png", mime="image/png")
