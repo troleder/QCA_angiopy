@@ -203,7 +203,12 @@ def arterySegmentation(inputImage, groundTruthPoints, segmentationModelWeights=N
 
     net = predict.nn.DataParallel(net)
 
-    device = predict.torch.device('cuda' if predict.torch.cuda.is_available() else 'cpu')
+    if predict.torch.cuda.is_available():
+        device = predict.torch.device('cuda')
+    elif predict.torch.backends.mps.is_available():
+        device = predict.torch.device('mps')
+    else:
+        device = predict.torch.device('cpu')
     net.to(device=device)
 
     net.load_state_dict(

@@ -4,3 +4,4 @@ utils/__pycache__/
 .DS_Store
 *.pth
 Dicom/
+google_credentials.json
