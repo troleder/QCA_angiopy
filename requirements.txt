@@ -12,6 +12,8 @@ Pillow==9.5.0
 plotly==5.16.1
 pretrainedmodels==0.7.4
 pydicom==2.4.3
+pylibjpeg
+pylibjpeg-libjpeg
 PyYAML==6.0.1
 scikit-image==0.21.0
 scikit-learn==1.3.0
