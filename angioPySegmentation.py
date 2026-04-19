@@ -1491,8 +1491,9 @@ if selectedDicom is not None:
                 _dl1.download_button("⬇ Download PDF", data=st.session_state["_last_pdf_buf"],
                     file_name=st.session_state.get("_last_pdf_name", "report.pdf"), mime="application/pdf", use_container_width=True)
                 if "_last_xlsx_buf" in st.session_state:
+                    _xlsx_fname = st.session_state.get("_last_pdf_name", "report.pdf").replace(".pdf", ".xlsx")
                     _dl2.download_button("⬇ Download Excel", data=st.session_state["_last_xlsx_buf"],
-                        file_name="AngioPy.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                        file_name=_xlsx_fname, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
             if st.button("💾 Save to Patient Report Cart", use_container_width=True, disabled=not has_pid):
                 try:
@@ -1585,7 +1586,7 @@ if selectedDicom is not None:
                     st.session_state["_last_pdf_buf"] = _pdf_buf
                     st.session_state["_last_pdf_name"] = pdf_filename
                 except Exception as e:
-                    st.session_state["_save_errors"] = [f"PDF error: {e}"]
+                    st.error(f"PDF error: {e}")
 
                 # ── Excel in memory (accumulated in session state) ────────────
                 try:
@@ -1620,7 +1621,7 @@ if selectedDicom is not None:
                     _xlsx_buf.seek(0)
                     st.session_state["_last_xlsx_buf"] = _xlsx_buf
                 except Exception as e:
-                    st.session_state.setdefault("_save_errors", []).append(f"Excel error: {e}")
+                    st.error(f"Excel error: {e}")
 
                 st.session_state.patient_cart.append(cart_item)
                 st.session_state.current_view = 'grid'
