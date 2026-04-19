@@ -15,6 +15,20 @@ import tifffile
 from streamlit_plotly_events import plotly_events
 from streamlit_drawable_canvas import st_canvas
 from PIL import Image
+
+# Fix streamlit-drawable-canvas 0.9.3 on Streamlit >= 1.28
+# In newer Streamlit, image_to_url signature changed (width:int → LayoutConfig).
+# Always bridge to new signature when available; fall back silently for old builds.
+import streamlit.elements.image as _st_image
+try:
+    from streamlit.elements.lib.image_utils import image_to_url as _new_image_to_url
+    from streamlit.elements.lib.layout_utils import LayoutConfig as _LayoutConfig
+    def _image_to_url(image, width, clamp, channels, output_format, image_id):
+        layout = _LayoutConfig(width=width if isinstance(width, int) else None)
+        return _new_image_to_url(image, layout, clamp, channels, output_format, image_id)
+    _st_image.image_to_url = _image_to_url
+except ImportError:
+    pass
 import predict
 import angioPyFunctions
 import scipy
