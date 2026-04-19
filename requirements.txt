@@ -28,3 +28,4 @@ tqdm==4.61.1
 pooch
 gspread
 google-auth
+openpyxl

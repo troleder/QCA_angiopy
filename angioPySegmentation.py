@@ -597,7 +597,7 @@ stepOne = st.sidebar.expander("STEP ONE", True)
 stepTwo = st.sidebar.expander("STEP TWO", True)
 
 with st.sidebar.expander("📁 Output folder", False):
-    _default_folder = os.path.expanduser("~/Desktop/AngioPy/")
+    _default_folder = os.path.expanduser("~/Library/Mobile Documents/com~apple~CloudDocs/AngioPy/")
     if "output_folder" not in st.session_state:
         st.session_state["output_folder"] = _default_folder
     st.session_state["output_folder"] = st.text_input(
@@ -1624,14 +1624,19 @@ if selectedDicom is not None:
                     
                     df_new = pd.DataFrame([row])
                     
+                    _expected_cols = list(row.keys())
                     if os.path.exists(target_xlsx):
                         try:
                             df_existing = pd.read_excel(target_xlsx)
+                            # drop any duplicate columns (e.g. "Lesion Length [mm].1")
+                            df_existing = df_existing.loc[:, ~df_existing.columns.duplicated()]
+                            # keep only known columns so stale extras don't accumulate
+                            df_existing = df_existing[[c for c in _expected_cols if c in df_existing.columns]]
                             df_final = pd.concat([df_existing, df_new], ignore_index=True)
                         except Exception:
                             df_final = df_new
                     else:
-                        os.makedirs(os.path.dirname(target_xlsx), exist_ok=True)
+                        os.makedirs(save_dir_xlsx, exist_ok=True)
                         df_final = df_new
                         
                     df_final.to_excel(target_xlsx, index=False)
