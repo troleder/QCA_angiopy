@@ -1485,7 +1485,16 @@ if selectedDicom is not None:
             _out_folder_display = st.session_state.get("output_folder", "~/Desktop/AngioPy/")
             st.caption(f"📁 Output folder: `{_out_folder_display}`")
 
-            if "_last_pdf_buf" in st.session_state:
+            if st.session_state.get("_save_errors"):
+                for _err in st.session_state["_save_errors"]:
+                    st.error(f"⚠️ Save error — {_err}")
+
+            if "_last_pdf_buf" in st.session_state and "_last_pdf_name" in st.session_state:
+                _saved_path = os.path.join(
+                    st.session_state.get("output_folder", ""),
+                    st.session_state["_last_pdf_name"]
+                )
+                st.success(f"✅ Saved to: `{_saved_path}`")
                 _dl1, _dl2 = st.columns(2)
                 _dl1.download_button("⬇ Download PDF", data=st.session_state["_last_pdf_buf"],
                     file_name=st.session_state.get("_last_pdf_name", "report.pdf"), mime="application/pdf", use_container_width=True)
@@ -1536,11 +1545,21 @@ if selectedDicom is not None:
                     "image": cv2.cvtColor(selectedFrameRGBA, cv2.COLOR_RGBA2RGB)
                 }
                 
+                def _clean_path(p):
+                    """Remove shell backslash-escapes and expand ~ ."""
+                    p = p.strip()
+                    # unescape: "\ " → " ", "\~" → "~", "\(" → "(" etc.
+                    import re
+                    p = re.sub(r'\\(.)', r'\1', p)
+                    return os.path.expanduser(p)
+
+                _save_errors = []
+
                 try:
                     import matplotlib.pyplot as plt
                     from matplotlib.backends.backend_pdf import PdfPages
                     import os
-                    save_dir = os.path.expanduser(st.session_state.get("output_folder", "~/Desktop/AngioPy/"))
+                    save_dir = _clean_path(st.session_state.get("output_folder", "~/Desktop/AngioPy/"))
                     os.makedirs(save_dir, exist_ok=True)
 
                     safe_patient_id = st.session_state.patient_id if st.session_state.patient_id else "NoID"
@@ -1591,13 +1610,13 @@ if selectedDicom is not None:
                     st.session_state["_last_pdf_buf"] = _pdf_buf
                     st.session_state["_last_pdf_name"] = pdf_filename
                 except Exception as e:
-                    st.warning(f"PDF not saved to disk: {e}")
+                    _save_errors.append(f"PDF: {e}")
 
                 try:
                     import pandas as pd
                     import os
 
-                    save_dir_xlsx = os.path.expanduser(st.session_state.get("output_folder", "~/Desktop/AngioPy/"))
+                    save_dir_xlsx = _clean_path(st.session_state.get("output_folder", "~/Desktop/AngioPy/"))
                     target_xlsx = os.path.join(save_dir_xlsx, "AngioPy.xlsx")
                     
                     row = {
@@ -1643,7 +1662,12 @@ if selectedDicom is not None:
                     _xlsx_buf.seek(0)
                     st.session_state["_last_xlsx_buf"] = _xlsx_buf
                 except Exception as e:
-                    st.warning(f"Excel not saved to disk: {e}")
+                    _save_errors.append(f"Excel: {e}")
+
+                if _save_errors:
+                    st.session_state["_save_errors"] = _save_errors
+                else:
+                    st.session_state.pop("_save_errors", None)
 
                 st.session_state.patient_cart.append(cart_item)
                 st.session_state.current_view = 'grid'
