@@ -703,12 +703,13 @@ if selectedDicom is not None:
                             cv2.line(calibBgFrame, (int(pt1[0]-dx), int(pt1[1]-dy)), (int(pt1[0]+dx), int(pt1[1]+dy)), (255, 0, 0), 1)
                             cv2.line(calibBgFrame, (int(pt2[0]-dx), int(pt2[1]-dy)), (int(pt2[0]+dx), int(pt2[1]+dy)), (255, 0, 0), 1)
 
+                st.image(calibBgFrame, use_column_width=True)
+
                 calibDotCanvas = st_canvas(
                     fill_color="#00000000",
-                    stroke_width=0, 
+                    stroke_width=0,
                     stroke_color="#00000000",
-                    background_color='black',
-                    background_image=Image.fromarray(calibBgFrame),
+                    background_color='#00000000',
                     update_streamlit=True,
                     height=512,
                     width=512,
@@ -856,12 +857,13 @@ if selectedDicom is not None:
                     if seg_key in st.session_state:
                         del st.session_state[seg_key]
                     st.rerun()
+                st.image(selectedFrameRGB, use_column_width=True)
+
                 annotationCanvas = st_canvas(
                     fill_color="red",
                     stroke_width=2,
                     stroke_color="red",
-                    background_color='black',
-                    background_image=Image.fromarray(selectedFrameRGB),
+                    background_color='#00000000',
                     update_streamlit=True,
                     height=512,
                     width=512,
