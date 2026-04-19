@@ -1,6 +1,6 @@
 # Python 3.10 compatible
 
-astropy>=5.3.0
+astropy==5.2.2
 efficientnet-pytorch==0.7.1
 fil-finder==1.7.2
 matplotlib==3.7.2
