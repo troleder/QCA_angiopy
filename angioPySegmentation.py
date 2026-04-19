@@ -725,9 +725,9 @@ if selectedDicom is not None:
                 raw_calib = st.session_state['calib_raw_clicks']
                 calib_display = calibBgFrame.copy()
                 for i, (px_x, px_y) in enumerate(raw_calib):
-                    cv2.circle(calib_display, (px_x, px_y), 6, (255, 50, 50), -1)
-                    cv2.putText(calib_display, str(i+1), (px_x+7, px_y-7),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 50, 50), 2)
+                    cv2.circle(calib_display, (px_x, px_y), 2, (255, 50, 50), -1)
+                    cv2.putText(calib_display, str(i+1), (px_x+3, px_y-3),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.18, (255, 50, 50), 1)
 
                 fig_calib = px.imshow(calib_display)
                 fig_calib.update_layout(height=600, width=600, margin=dict(l=0, r=0, t=0, b=0), dragmode=False,
