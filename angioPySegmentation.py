@@ -596,15 +596,6 @@ if "dicomDropDown" not in st.session_state:
 stepOne = st.sidebar.expander("STEP ONE", True)
 stepTwo = st.sidebar.expander("STEP TWO", True)
 
-with st.sidebar.expander("📁 Output folder", False):
-    if "output_folder" not in st.session_state:
-        st.session_state["output_folder"] = "~/Library/Mobile Documents/com~apple~CloudDocs/AngioPy/"
-    st.text_input(
-        "Folder path for PDF & Excel",
-        key="output_folder",
-        help="Reports and Excel database will be saved here. On Streamlit Cloud use the download buttons instead.",
-    )
-    st.caption("Set once — applies to all saves in this session.")
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 tab1, tab2 = st.tabs(["Segmentation", "Analysis"])
@@ -1482,19 +1473,20 @@ if selectedDicom is not None:
             if not has_pid:
                 st.error("🚨 Brak Patient ID! Uzupełnij pole powyżej, aby móc zapisać analizę.")
             
-            _out_folder_display = st.session_state.get("output_folder", "~/Desktop/AngioPy/")
-            st.caption(f"📁 Output folder: `{_out_folder_display}`")
-
-            if st.session_state.get("_save_errors"):
-                for _err in st.session_state["_save_errors"]:
-                    st.error(f"⚠️ Save error — {_err}")
+            # ── Upload existing Excel to continue accumulating ─────────────────
+            with st.expander("📂 Upload existing AngioPy.xlsx to merge", False):
+                uploaded_xlsx = st.file_uploader("Upload AngioPy.xlsx", type=["xlsx"], key="upload_existing_xlsx")
+                if uploaded_xlsx is not None:
+                    try:
+                        _df_up = pd.read_excel(uploaded_xlsx)
+                        _df_up = _df_up.loc[:, ~_df_up.columns.duplicated()]
+                        st.session_state["accumulated_xlsx_df"] = _df_up
+                        st.success(f"✅ Loaded {len(_df_up)} rows from uploaded file.")
+                    except Exception as _ue:
+                        st.error(f"Could not read file: {_ue}")
 
             if "_last_pdf_buf" in st.session_state and "_last_pdf_name" in st.session_state:
-                _saved_path = os.path.join(
-                    st.session_state.get("output_folder", ""),
-                    st.session_state["_last_pdf_name"]
-                )
-                st.success(f"✅ Saved to: `{_saved_path}`")
+                st.success(f"✅ Ready to download: `{st.session_state['_last_pdf_name']}`")
                 _dl1, _dl2 = st.columns(2)
                 _dl1.download_button("⬇ Download PDF", data=st.session_state["_last_pdf_buf"],
                     file_name=st.session_state.get("_last_pdf_name", "report.pdf"), mime="application/pdf", use_container_width=True)
@@ -1545,52 +1537,35 @@ if selectedDicom is not None:
                     "image": cv2.cvtColor(selectedFrameRGBA, cv2.COLOR_RGBA2RGB)
                 }
                 
-                def _clean_path(p):
-                    import re
-                    p = p.strip()
-                    p = re.sub(r'\\(.)', r'\1', p)
-                    return os.path.expanduser(p)
-
-                _save_errors = []
                 safe_patient_id = st.session_state.patient_id if st.session_state.patient_id else "NoID"
-                _out_dir = _clean_path(st.session_state.get("output_folder", "~/Desktop/AngioPy/"))
-                try:
-                    os.makedirs(_out_dir, exist_ok=True)
-                except Exception as e:
-                    _save_errors.append(f"Cannot create folder '{_out_dir}': {e}")
 
+                # ── PDF in memory ─────────────────────────────────────────────
                 try:
                     import matplotlib.pyplot as plt
                     from matplotlib.backends.backend_pdf import PdfPages
-                    save_dir = _out_dir
                     pdf_filename = f"{safe_patient_id}_{meta['vessel']}_{meta['phase']}.pdf"
-                    pdf_path = os.path.join(save_dir, pdf_filename)
-                    
-                    with PdfPages(pdf_path) as pdf:
+                    _pdf_buf = io.BytesIO()
+                    with PdfPages(_pdf_buf) as pdf:
                         fig_pdf = plt.figure(figsize=(8.27, 11.69))
                         fig_pdf.text(0.5, 0.96, "AngioPy Single Evaluation Report", ha='center', fontsize=18, weight='bold')
                         fig_pdf.text(0.5, 0.92, f"Patient: {safe_patient_id}  |  Phase: {meta['phase']}  |  Segment: AHA {meta['aha']} ({meta['vessel']})", ha='center', fontsize=12)
                         fig_pdf.text(0.1, 0.85, f"TIMI Flow Scale: Grade {final_timi}", fontsize=14, weight='bold', color='darkred')
                         fig_pdf.text(0.1, 0.82, f"TFC (TIMI Frame Count): {tfc}", fontsize=12)
                         fig_pdf.text(0.1, 0.79, f"Justification: {just}", fontsize=11, style='italic')
-                        
                         if meta['phase'] == 'PRE-PCI':
                             lbl = ">50% distal to FFR"
                             ffr_txt = f"FFR Registered: {meta['ffr_registered']}  |  "
                         else:
                             lbl = ">50% distal to DES/DCB"
                             ffr_txt = ""
-                            
                         fig_pdf.text(0.1, 0.76, f"{ffr_txt}{lbl}: {meta['other_lesion_distal']}", fontsize=12, weight='bold')
                         fig_pdf.text(0.1, 0.72, "QCA Metrics Summary", fontsize=14, weight='bold')
-                        
                         str_dist = "N/A" if distDiamMm == "N/A" else f"{distDiamMm:.2f} mm"
-                        str_ref = "N/A" if refDiamMm == "N/A" else f"{refDiamMm:.2f} mm"
-                        str_mld = "N/A" if mldMm == "N/A" else f"{mldMm:.2f} mm"
-                        str_pctD = "N/A" if pctDiam == "N/A" else f"{pctDiam:.1f} %"
-                        str_pctA = "N/A" if pctArea == "N/A" else f"{pctArea:.1f} %"
-                        str_len = "N/A" if totalLenMm == "N/A" else f"{totalLenMm:.2f} mm"
-                        
+                        str_ref  = "N/A" if refDiamMm  == "N/A" else f"{refDiamMm:.2f} mm"
+                        str_mld  = "N/A" if mldMm      == "N/A" else f"{mldMm:.2f} mm"
+                        str_pctD = "N/A" if pctDiam     == "N/A" else f"{pctDiam:.1f} %"
+                        str_pctA = "N/A" if pctArea     == "N/A" else f"{pctArea:.1f} %"
+                        str_len  = "N/A" if totalLenMm  == "N/A" else f"{totalLenMm:.2f} mm"
                         m_text = (
                             f"Max Proximal Reference:      {proxDiamMm:.2f} mm\n\n"
                             f"Max Distal Reference:        {str_dist}\n\n"
@@ -1606,23 +1581,17 @@ if selectedDicom is not None:
                         ax.axis('off')
                         pdf.savefig(fig_pdf)
                         plt.close(fig_pdf)
-                    _pdf_buf = io.BytesIO(open(pdf_path, 'rb').read())
+                    _pdf_buf.seek(0)
                     st.session_state["_last_pdf_buf"] = _pdf_buf
                     st.session_state["_last_pdf_name"] = pdf_filename
                 except Exception as e:
-                    _save_errors.append(f"PDF: {e}")
+                    st.session_state["_save_errors"] = [f"PDF error: {e}"]
 
+                # ── Excel in memory (accumulated in session state) ────────────
                 try:
-                    import pandas as pd
-                    import os
-
-                    save_dir_xlsx = _out_dir
-                    target_xlsx = os.path.join(save_dir_xlsx, "AngioPy.xlsx")
-                    os.makedirs(save_dir_xlsx, exist_ok=True)
-                    
                     row = {
-                        "Patient ID": safe_patient_id, 
-                        "DICOM Name": dicomLabel, 
+                        "Patient ID": safe_patient_id,
+                        "DICOM Name": dicomLabel,
                         "Phase": meta["phase"],
                         "Vessel": meta["vessel"],
                         "AHA Segment": meta["aha"],
@@ -1631,43 +1600,27 @@ if selectedDicom is not None:
                         "Known Occluded Vessel": meta["known_occlude"],
                         "Max Prox [mm]": round(proxDiamMm, 2),
                         "Max Dist [mm]": "N/A" if distDiamMm == "N/A" else round(distDiamMm, 2),
-                        "Reference [mm]": "N/A" if refDiamMm == "N/A" else round(refDiamMm, 2),
-                        "MLD [mm]": "N/A" if mldMm == "N/A" else round(mldMm, 2),
+                        "Reference [mm]":  "N/A" if refDiamMm  == "N/A" else round(refDiamMm, 2),
+                        "MLD [mm]":        "N/A" if mldMm      == "N/A" else round(mldMm, 2),
                         "% Diameter Stenosis": "N/A" if pctDiam == "N/A" else round(pctDiam, 1),
-                        "% Area Stenosis": "N/A" if pctArea == "N/A" else round(pctArea, 1),
-                        "Lesion Length [mm]": "N/A" if totalLenMm == "N/A" else round(totalLenMm, 2),
+                        "% Area Stenosis":     "N/A" if pctArea == "N/A" else round(pctArea, 1),
+                        "Lesion Length [mm]":  "N/A" if totalLenMm == "N/A" else round(totalLenMm, 2),
                         "TIMI Grade": final_timi,
-                        "TFC": tfc
+                        "TFC": tfc,
                     }
-                    
                     df_new = pd.DataFrame([row])
-                    
-                    _expected_cols = list(row.keys())
-                    if os.path.exists(target_xlsx):
-                        try:
-                            df_existing = pd.read_excel(target_xlsx)
-                            # drop any duplicate columns (e.g. "Lesion Length [mm].1")
-                            df_existing = df_existing.loc[:, ~df_existing.columns.duplicated()]
-                            # keep only known columns so stale extras don't accumulate
-                            df_existing = df_existing[[c for c in _expected_cols if c in df_existing.columns]]
-                            df_final = pd.concat([df_existing, df_new], ignore_index=True)
-                        except Exception:
-                            df_final = df_new
-                    else:
-                        df_final = df_new
-                        
-                    df_final.to_excel(target_xlsx, index=False)
+                    df_existing = st.session_state.get("accumulated_xlsx_df", pd.DataFrame())
+                    if not df_existing.empty:
+                        df_existing = df_existing.loc[:, ~df_existing.columns.duplicated()]
+                        df_existing = df_existing[[c for c in row.keys() if c in df_existing.columns]]
+                    df_final = pd.concat([df_existing, df_new], ignore_index=True)
+                    st.session_state["accumulated_xlsx_df"] = df_final
                     _xlsx_buf = io.BytesIO()
                     df_final.to_excel(_xlsx_buf, index=False)
                     _xlsx_buf.seek(0)
                     st.session_state["_last_xlsx_buf"] = _xlsx_buf
                 except Exception as e:
-                    _save_errors.append(f"Excel: {e}")
-
-                if _save_errors:
-                    st.session_state["_save_errors"] = _save_errors
-                else:
-                    st.session_state.pop("_save_errors", None)
+                    st.session_state.setdefault("_save_errors", []).append(f"Excel error: {e}")
 
                 st.session_state.patient_cart.append(cart_item)
                 st.session_state.current_view = 'grid'
