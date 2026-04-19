@@ -1475,18 +1475,18 @@ if selectedDicom is not None:
                 st.error("🚨 Brak Patient ID! Uzupełnij pole powyżej, aby móc zapisać analizę.")
             
 
-            _pdf_ready = "_last_pdf_buf" in st.session_state and "_last_pdf_name" in st.session_state
-            _xlsx_ready = "_last_xlsx_buf" in st.session_state
-            _dl1, _dl2 = st.columns(2)
-            _pdf_data = st.session_state.get("_last_pdf_buf", b"")
-            _pdf_name = st.session_state.get("_last_pdf_name", "report.pdf")
-            _xlsx_name = _pdf_name.replace(".pdf", ".xlsx")
-            _xlsx_data = st.session_state.get("_last_xlsx_buf", b"")
-            _dl1.download_button("⬇ Download PDF", data=_pdf_data, file_name=_pdf_name,
-                mime="application/pdf", use_container_width=True, disabled=not _pdf_ready)
-            _dl2.download_button("⬇ Download Excel", data=_xlsx_data, file_name=_xlsx_name,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True, disabled=not _xlsx_ready)
+            if "_last_pdf_buf" in st.session_state and "_last_xlsx_buf" in st.session_state:
+                _pdf_name  = st.session_state["_last_pdf_name"]
+                _xlsx_name = _pdf_name.replace(".pdf", ".xlsx")
+                _dl1, _dl2 = st.columns(2)
+                _dl1.download_button("⬇ Download PDF", data=st.session_state["_last_pdf_buf"],
+                    file_name=_pdf_name, mime="application/pdf", use_container_width=True)
+                _dl2.download_button("⬇ Download Excel", data=st.session_state["_last_xlsx_buf"],
+                    file_name=_xlsx_name,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True)
+            else:
+                st.info("💾 Kliknij 'Save to Patient Report Cart' aby wygenerować PDF i Excel.")
 
             if st.button("💾 Save to Patient Report Cart", use_container_width=True, disabled=not has_pid):
                 try:
