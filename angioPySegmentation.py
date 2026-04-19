@@ -1097,9 +1097,10 @@ if selectedDicom is not None:
 
     # ── ANALYSIS TAB ──────────────────────────────────────────────────────────
     if numpy.sum(predictedMask) > 0:
-        b_channel, g_channel, r_channel = cv2.split(predictedMask)
-        a_channel = numpy.full_like(predictedMask[:, :, 0], fill_value=255)
-        predictedMaskRGBA = cv2.merge((predictedMask, a_channel))
+        if len(predictedMask.shape) == 2:
+            predictedMask = cv2.cvtColor(predictedMask, cv2.COLOR_GRAY2BGR)
+        a_channel = numpy.full(predictedMask.shape[:2], 255, dtype=numpy.uint8)
+        predictedMaskRGBA = numpy.dstack([predictedMask, a_channel])
 
         with tab2:
             tab2Col1, tab2Col2 = st.columns([20, 10])
