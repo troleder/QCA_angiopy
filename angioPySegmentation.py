@@ -232,36 +232,30 @@ if st.session_state.current_view == 'grid':
             total_bytes = sum(f.size for f in new_files)
             processed_bytes = 0
             _t0 = time.time()
+            _status_placeholder = st.sidebar.empty()
 
-            with st.sidebar.status("📥 Wgrywanie plików…", expanded=True) as status:
-                for idx, uploadedDicom in enumerate(new_files):
-                    tmpPath = os.path.join(tempfile.gettempdir(), uploadedDicom.name)
-                    with open(tmpPath, "wb") as f:
-                        f.write(uploadedDicom.getbuffer())
-                    st.session_state.dicom_registry[uploadedDicom.name] = tmpPath
-                    processed_bytes += uploadedDicom.size
-                    pct = min(1.0, processed_bytes / total_bytes if total_bytes > 0 else 1.0)
-                    elapsed = time.time() - _t0
-
-                    if pct > 0.01 and elapsed > 0:
-                        eta_secs = (elapsed / pct - elapsed)
-                        if eta_secs >= 60:
-                            eta_str = f"~{eta_secs/60:.0f}m"
-                        else:
-                            eta_str = f"~{eta_secs:.0f}s"
-                    else:
-                        eta_str = ""
-
-                    msg = f"{pct*100:.0f}%  •  {processed_bytes/1e6:.1f}/{total_bytes/1e6:.1f} MB  •  {eta_str}"
-                    status.update(label=msg, state="running")
-
-                status.update(label=f"✅ Wgrano {len(new_files)} plik(ów)", state="complete")
-        else:
-            for uploadedDicom in uploadedDicoms:
+            for idx, uploadedDicom in enumerate(new_files):
                 tmpPath = os.path.join(tempfile.gettempdir(), uploadedDicom.name)
                 with open(tmpPath, "wb") as f:
                     f.write(uploadedDicom.getbuffer())
                 st.session_state.dicom_registry[uploadedDicom.name] = tmpPath
+                processed_bytes += uploadedDicom.size
+                pct = min(1.0, processed_bytes / total_bytes if total_bytes > 0 else 1.0)
+                elapsed = time.time() - _t0
+
+                if pct > 0.01 and elapsed > 0:
+                    eta_secs = (elapsed / pct - elapsed)
+                    if eta_secs >= 60:
+                        eta_str = f"~{eta_secs/60:.0f}m"
+                    else:
+                        eta_str = f"~{eta_secs:.0f}s"
+                else:
+                    eta_str = ""
+
+                msg = f"📥 {pct*100:.0f}%  •  {processed_bytes/1e6:.1f}/{total_bytes/1e6:.1f} MB  •  {eta_str}"
+                _status_placeholder.info(msg)
+
+            _status_placeholder.success(f"✅ Wgrano {len(new_files)} plik(ów)")
 
     if st.sidebar.button("🔃 Sortuj sekwencje", use_container_width=True, key="sidebar_sort_btn"):
         st.session_state._sidebar_sort_requested = True
