@@ -952,6 +952,10 @@ if selectedDicom is not None:
                             cv2.line(calibShowFrame, (int(pt2[0]-dx), int(pt2[1]-dy)), (int(pt2[0]+dx), int(pt2[1]+dy)), (255, 0, 0), 1)
                 st.image(calibShowFrame, use_column_width=True)
             else:
+                _mask_preview_key = f"predicted_mask_{dicomLabel}_{slice_ix}"
+                if _mask_preview_key not in st.session_state:
+                    st.info("Click points on the artery in the left panel, then click **▶ Run Segmentation**.")
+                    st.image(selectedFrameRGB, use_column_width=True)
                 st.markdown("<h5 style='text-align:center; color:white;'>🔍 Zoom & Mask Correction</h5>", unsafe_allow_html=True)
                 
                 col_z1, col_z2, col_z3 = st.columns(3)
@@ -1073,6 +1077,8 @@ if selectedDicom is not None:
                     base_overlay[contour_preview, :] = [0, 255, 0]
 
                 viewport_overlay = base_overlay[top_y:top_y+h_z, left_x:left_x+w_z]
+
+                st.image(viewport_overlay, use_column_width=True)
 
                 maskCanvas = st_canvas(
                     fill_color="rgba(255,255,255,0.0)",
