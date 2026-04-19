@@ -12,13 +12,8 @@ import streamlit.components.v1 as components
 import plotly.express as px
 import plotly.graph_objects as go
 import tifffile
-from streamlit_plotly_events import plotly_events
-from streamlit_drawable_canvas import st_canvas
-from PIL import Image
-
-# Fix streamlit-drawable-canvas 0.9.3 on Streamlit >= 1.28
+# Fix streamlit-drawable-canvas 0.9.3 on Streamlit >= 1.28 — MUST be before canvas import.
 # In newer Streamlit, image_to_url signature changed (width:int → LayoutConfig).
-# Always bridge to new signature when available; fall back silently for old builds.
 import streamlit.elements.image as _st_image
 try:
     from streamlit.elements.lib.image_utils import image_to_url as _new_image_to_url
@@ -29,6 +24,10 @@ try:
     _st_image.image_to_url = _image_to_url
 except ImportError:
     pass
+
+from streamlit_plotly_events import plotly_events
+from streamlit_drawable_canvas import st_canvas
+from PIL import Image
 import predict
 import angioPyFunctions
 import scipy
