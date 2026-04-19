@@ -597,14 +597,12 @@ stepOne = st.sidebar.expander("STEP ONE", True)
 stepTwo = st.sidebar.expander("STEP TWO", True)
 
 with st.sidebar.expander("📁 Output folder", False):
-    _default_folder = os.path.expanduser("~/Library/Mobile Documents/com~apple~CloudDocs/AngioPy/")
     if "output_folder" not in st.session_state:
-        st.session_state["output_folder"] = _default_folder
-    st.session_state["output_folder"] = st.text_input(
+        st.session_state["output_folder"] = "~/Library/Mobile Documents/com~apple~CloudDocs/AngioPy/"
+    st.text_input(
         "Folder path for PDF & Excel",
-        value=st.session_state["output_folder"],
+        key="output_folder",
         help="Reports and Excel database will be saved here. On Streamlit Cloud use the download buttons instead.",
-        key="output_folder_input"
     )
     st.caption("Set once — applies to all saves in this session.")
 
