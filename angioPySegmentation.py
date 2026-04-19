@@ -1546,23 +1546,23 @@ if selectedDicom is not None:
                 }
                 
                 def _clean_path(p):
-                    """Remove shell backslash-escapes and expand ~ ."""
-                    p = p.strip()
-                    # unescape: "\ " → " ", "\~" → "~", "\(" → "(" etc.
                     import re
+                    p = p.strip()
                     p = re.sub(r'\\(.)', r'\1', p)
                     return os.path.expanduser(p)
 
                 _save_errors = []
+                safe_patient_id = st.session_state.patient_id if st.session_state.patient_id else "NoID"
+                _out_dir = _clean_path(st.session_state.get("output_folder", "~/Desktop/AngioPy/"))
+                try:
+                    os.makedirs(_out_dir, exist_ok=True)
+                except Exception as e:
+                    _save_errors.append(f"Cannot create folder '{_out_dir}': {e}")
 
                 try:
                     import matplotlib.pyplot as plt
                     from matplotlib.backends.backend_pdf import PdfPages
-                    import os
-                    save_dir = _clean_path(st.session_state.get("output_folder", "~/Desktop/AngioPy/"))
-                    os.makedirs(save_dir, exist_ok=True)
-
-                    safe_patient_id = st.session_state.patient_id if st.session_state.patient_id else "NoID"
+                    save_dir = _out_dir
                     pdf_filename = f"{safe_patient_id}_{meta['vessel']}_{meta['phase']}.pdf"
                     pdf_path = os.path.join(save_dir, pdf_filename)
                     
@@ -1616,8 +1616,9 @@ if selectedDicom is not None:
                     import pandas as pd
                     import os
 
-                    save_dir_xlsx = _clean_path(st.session_state.get("output_folder", "~/Desktop/AngioPy/"))
+                    save_dir_xlsx = _out_dir
                     target_xlsx = os.path.join(save_dir_xlsx, "AngioPy.xlsx")
+                    os.makedirs(save_dir_xlsx, exist_ok=True)
                     
                     row = {
                         "Patient ID": safe_patient_id, 
@@ -1653,7 +1654,6 @@ if selectedDicom is not None:
                         except Exception:
                             df_final = df_new
                     else:
-                        os.makedirs(save_dir_xlsx, exist_ok=True)
                         df_final = df_new
                         
                     df_final.to_excel(target_xlsx, index=False)
