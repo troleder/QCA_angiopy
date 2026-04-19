@@ -1095,7 +1095,7 @@ if selectedDicom is not None:
                 )
 
     # ── ANALYSIS TAB ──────────────────────────────────────────────────────────
-    if numpy.sum(predictedMask) > 0 and len(objects) > 4:
+    if numpy.sum(predictedMask) > 0:
         b_channel, g_channel, r_channel = cv2.split(predictedMask)
         a_channel = numpy.full_like(predictedMask[:, :, 0], fill_value=255)
         predictedMaskRGBA = cv2.merge((predictedMask, a_channel))
