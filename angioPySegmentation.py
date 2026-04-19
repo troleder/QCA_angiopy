@@ -1483,20 +1483,6 @@ if selectedDicom is not None:
             has_pid = bool(st.session_state.patient_id and st.session_state.patient_id.strip() != "")
             if not has_pid:
                 st.error("🚨 Brak Patient ID! Uzupełnij pole powyżej, aby móc zapisać analizę.")
-            
-
-            if "_last_pdf_buf" in st.session_state and "_last_xlsx_buf" in st.session_state:
-                _pdf_name  = st.session_state["_last_pdf_name"]
-                _xlsx_name = _pdf_name.replace(".pdf", ".xlsx")
-                _dl1, _dl2 = st.columns(2)
-                _dl1.download_button("⬇ Download PDF", data=st.session_state["_last_pdf_buf"],
-                    file_name=_pdf_name, mime="application/pdf", use_container_width=True)
-                _dl2.download_button("⬇ Download Excel", data=st.session_state["_last_xlsx_buf"],
-                    file_name=_xlsx_name,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True)
-            else:
-                st.info("💾 Kliknij 'Save to Patient Report Cart' aby wygenerować PDF i Excel.")
 
             if st.button("💾 Save to Patient Report Cart", use_container_width=True, disabled=not has_pid):
                 try:
@@ -1621,5 +1607,15 @@ if selectedDicom is not None:
                     st.error(f"Excel error: {e}")
 
                 st.session_state.patient_cart.append(cart_item)
-                st.session_state.current_view = 'grid'
-                st.rerun()
+
+            if "_last_pdf_buf" in st.session_state and "_last_xlsx_buf" in st.session_state:
+                _pdf_name  = st.session_state["_last_pdf_name"]
+                _xlsx_name = _pdf_name.replace(".pdf", ".xlsx")
+                _dl1, _dl2 = st.columns(2)
+                _dl1.download_button("⬇ Download PDF", data=st.session_state["_last_pdf_buf"],
+                    file_name=_pdf_name, mime="application/pdf", use_container_width=True,
+                    key="dl_pdf_analysis")
+                _dl2.download_button("⬇ Download Excel", data=st.session_state["_last_xlsx_buf"],
+                    file_name=_xlsx_name,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True, key="dl_xlsx_analysis")
