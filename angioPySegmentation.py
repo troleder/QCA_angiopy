@@ -1474,17 +1474,6 @@ if selectedDicom is not None:
             if not has_pid:
                 st.error("🚨 Brak Patient ID! Uzupełnij pole powyżej, aby móc zapisać analizę.")
             
-            # ── Upload existing Excel to continue accumulating ─────────────────
-            with st.expander("📂 Upload existing AngioPy.xlsx to merge", False):
-                uploaded_xlsx = st.file_uploader("Upload AngioPy.xlsx", type=["xlsx"], key="upload_existing_xlsx")
-                if uploaded_xlsx is not None:
-                    try:
-                        _df_up = pd.read_excel(uploaded_xlsx)
-                        _df_up = _df_up.loc[:, ~_df_up.columns.duplicated()]
-                        st.session_state["accumulated_xlsx_df"] = _df_up
-                        st.success(f"✅ Loaded {len(_df_up)} rows from uploaded file.")
-                    except Exception as _ue:
-                        st.error(f"Could not read file: {_ue}")
 
             if "_last_pdf_buf" in st.session_state and "_last_pdf_name" in st.session_state:
                 st.success(f"✅ Ready to download: `{st.session_state['_last_pdf_name']}`")
@@ -1611,14 +1600,8 @@ if selectedDicom is not None:
                         "TFC": tfc,
                     }
                     df_new = pd.DataFrame([row])
-                    df_existing = st.session_state.get("accumulated_xlsx_df", pd.DataFrame())
-                    if not df_existing.empty:
-                        df_existing = df_existing.loc[:, ~df_existing.columns.duplicated()]
-                        df_existing = df_existing[[c for c in row.keys() if c in df_existing.columns]]
-                    df_final = pd.concat([df_existing, df_new], ignore_index=True)
-                    st.session_state["accumulated_xlsx_df"] = df_final
                     _xlsx_buf = io.BytesIO()
-                    df_final.to_excel(_xlsx_buf, index=False)
+                    df_new.to_excel(_xlsx_buf, index=False)
                     _xlsx_buf.seek(0)
                     st.session_state["_last_xlsx_buf"] = _xlsx_buf
                 except Exception as e:
