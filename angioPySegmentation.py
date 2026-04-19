@@ -730,7 +730,7 @@ if selectedDicom is not None:
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 50, 50), 2)
 
                 fig_calib = px.imshow(calib_display)
-                fig_calib.update_layout(height=512, margin=dict(l=0, r=0, t=0, b=0), dragmode=False,
+                fig_calib.update_layout(height=600, margin=dict(l=0, r=0, t=0, b=0), dragmode=False,
                     hoverlabel=dict(bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)",
                                     font=dict(color="rgba(0,0,0,0)")))
                 fig_calib.update_traces(hovertemplate="<extra></extra>")
@@ -894,7 +894,7 @@ if selectedDicom is not None:
                     cv2.circle(annot_display, (ax, ay), 4, (255, 50, 50), -1)
 
                 fig_annot = px.imshow(annot_display)
-                fig_annot.update_layout(height=512, margin=dict(l=0, r=0, t=0, b=0), dragmode=False,
+                fig_annot.update_layout(height=600, margin=dict(l=0, r=0, t=0, b=0), dragmode=False,
                     hoverlabel=dict(bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)",
                                     font=dict(color="rgba(0,0,0,0)")))
                 fig_annot.update_traces(hovertemplate="<extra></extra>")
@@ -1104,8 +1104,8 @@ if selectedDicom is not None:
                     background_color='black',
                     background_image=Image.fromarray(viewport_overlay),
                     update_streamlit=True,
-                    height=512,
-                    width=512,
+                    height=600,
+                    width=600,
                     drawing_mode="freedraw",
                     point_display_radius=3,
                     key=canvas_key,
