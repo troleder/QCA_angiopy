@@ -731,6 +731,7 @@ if selectedDicom is not None:
 
                 fig_calib = px.imshow(calib_display)
                 fig_calib.update_layout(height=512, margin=dict(l=0, r=0, t=0, b=0), dragmode=False)
+                fig_calib.update_traces(hovertemplate="<extra></extra>")
                 fig_calib.update_xaxes(showticklabels=False, range=[0, 512])
                 fig_calib.update_yaxes(showticklabels=False, range=[512, 0])
 
@@ -892,6 +893,7 @@ if selectedDicom is not None:
 
                 fig_annot = px.imshow(annot_display)
                 fig_annot.update_layout(height=512, margin=dict(l=0, r=0, t=0, b=0), dragmode=False)
+                fig_annot.update_traces(hovertemplate="<extra></extra>")
                 fig_annot.update_xaxes(showticklabels=False, range=[0, 512])
                 fig_annot.update_yaxes(showticklabels=False, range=[512, 0])
 
