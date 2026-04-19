@@ -1403,6 +1403,64 @@ if selectedDicom is not None:
                 m1.metric("% Diameter Stenosis", f"{pctDiam:.1f}%")
                 m2.metric("% Area Stenosis",     f"{pctArea:.1f}%")
 
+            # ── Auto-generate PDF + Excel on every render ─────────────────────
+            try:
+                import matplotlib.pyplot as plt
+                from matplotlib.backends.backend_pdf import PdfPages
+                _auto_meta = st.session_state.dicom_metadata.get(dicomLabel, {})
+                _auto_pid  = st.session_state.patient_id if st.session_state.patient_id else "NoID"
+                _auto_vessel = _auto_meta.get("vessel", selectedArtery)
+                _auto_phase  = _auto_meta.get("phase", "UNKNOWN")
+                _auto_aha    = _auto_meta.get("aha", "?")
+                _auto_fname  = f"{_auto_pid}_{_auto_vessel}_{_auto_phase}.pdf"
+
+                _auto_pdf = io.BytesIO()
+                with PdfPages(_auto_pdf) as _apdf:
+                    _fig = plt.figure(figsize=(8.27, 11.69))
+                    _fig.text(0.5, 0.96, "AngioPy Single Evaluation Report", ha='center', fontsize=18, weight='bold')
+                    _fig.text(0.5, 0.92, f"Patient: {_auto_pid}  |  Phase: {_auto_phase}  |  Segment: AHA {_auto_aha} ({_auto_vessel})", ha='center', fontsize=12)
+                    _fig.text(0.1, 0.72, "QCA Metrics Summary", fontsize=14, weight='bold')
+                    _sd = "N/A" if distDiamMm == "N/A" else f"{distDiamMm:.2f} mm"
+                    _sr = "N/A" if refDiamMm  == "N/A" else f"{refDiamMm:.2f} mm"
+                    _sm = "N/A" if mldMm      == "N/A" else f"{mldMm:.2f} mm"
+                    _sp = "N/A" if pctDiam    == "N/A" else f"{pctDiam:.1f} %"
+                    _sa = "N/A" if pctArea    == "N/A" else f"{pctArea:.1f} %"
+                    _sl = "N/A" if totalLenMm == "N/A" else f"{totalLenMm:.2f} mm"
+                    _mt = (f"Max Proximal Reference:      {proxDiamMm:.2f} mm\n\n"
+                           f"Max Distal Reference:        {_sd}\n\n"
+                           f"Calculated Reference:        {_sr}\n\n"
+                           f"Minimum Lumen Diameter:      {_sm}\n\n"
+                           f"% Diameter Stenosis:         {_sp}\n\n"
+                           f"% Area Stenosis:             {_sa}\n\n"
+                           f"Lesion Length:               {_sl}")
+                    _fig.text(0.1, 0.68, _mt, fontsize=11, family='monospace', va='top')
+                    _ax = _fig.add_axes([0.1, 0.05, 0.8, 0.45])
+                    _ax.imshow(cv2.cvtColor(selectedFrameRGBA, cv2.COLOR_RGBA2RGB))
+                    _ax.axis('off')
+                    _apdf.savefig(_fig)
+                    plt.close(_fig)
+                _auto_pdf.seek(0)
+                st.session_state["_last_pdf_buf"]  = _auto_pdf
+                st.session_state["_last_pdf_name"] = _auto_fname
+
+                _auto_row = {
+                    "Patient ID": _auto_pid, "DICOM Name": dicomLabel,
+                    "Phase": _auto_phase, "Vessel": _auto_vessel, "AHA Segment": _auto_aha,
+                    "Max Prox [mm]": round(proxDiamMm, 2),
+                    "Max Dist [mm]": "N/A" if distDiamMm == "N/A" else round(distDiamMm, 2),
+                    "Reference [mm]":  "N/A" if refDiamMm  == "N/A" else round(refDiamMm, 2),
+                    "MLD [mm]":        "N/A" if mldMm      == "N/A" else round(mldMm, 2),
+                    "% Diameter Stenosis": "N/A" if pctDiam == "N/A" else round(pctDiam, 1),
+                    "% Area Stenosis":     "N/A" if pctArea == "N/A" else round(pctArea, 1),
+                    "Lesion Length [mm]":  "N/A" if totalLenMm == "N/A" else round(totalLenMm, 2),
+                }
+                _auto_xlsx = io.BytesIO()
+                pd.DataFrame([_auto_row]).to_excel(_auto_xlsx, index=False)
+                _auto_xlsx.seek(0)
+                st.session_state["_last_xlsx_buf"] = _auto_xlsx
+            except Exception:
+                pass
+
             # ── EXPORT ────────────────────────────────────────────────────────
             dicomBaseName = os.path.splitext(os.path.basename(selectedDicom))[0]
             st.markdown("---")
@@ -1484,22 +1542,17 @@ if selectedDicom is not None:
             if not has_pid:
                 st.error("🚨 Brak Patient ID! Uzupełnij pole powyżej, aby móc zapisać analizę.")
 
-            # ── Download buttons – always visible ─────────────────────────────
-            _has_files = "_last_pdf_buf" in st.session_state and "_last_xlsx_buf" in st.session_state
+            # ── Download buttons – always active ──────────────────────────────
+            _pdf_name  = st.session_state.get("_last_pdf_name", "report.pdf")
+            _xlsx_name = _pdf_name.replace(".pdf", ".xlsx")
             _dl1, _dl2 = st.columns(2)
-            if _has_files:
-                _pdf_name  = st.session_state["_last_pdf_name"]
-                _xlsx_name = _pdf_name.replace(".pdf", ".xlsx")
-                _dl1.download_button("⬇ Download PDF", data=st.session_state["_last_pdf_buf"],
-                    file_name=_pdf_name, mime="application/pdf",
-                    use_container_width=True, key="dl_pdf_top")
-                _dl2.download_button("⬇ Download Excel", data=st.session_state["_last_xlsx_buf"],
-                    file_name=_xlsx_name,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True, key="dl_xlsx_top")
-            else:
-                _dl1.button("⬇ Download PDF", disabled=True, use_container_width=True, key="dl_pdf_top_dis")
-                _dl2.button("⬇ Download Excel", disabled=True, use_container_width=True, key="dl_xlsx_top_dis")
+            _dl1.download_button("⬇ Download PDF", data=st.session_state["_last_pdf_buf"],
+                file_name=_pdf_name, mime="application/pdf",
+                use_container_width=True, key="dl_pdf_top")
+            _dl2.download_button("⬇ Download Excel", data=st.session_state["_last_xlsx_buf"],
+                file_name=_xlsx_name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True, key="dl_xlsx_top")
 
             if st.button("💾 Save to Patient Report Cart", use_container_width=True, disabled=not has_pid):
                 try:
