@@ -36,6 +36,7 @@ import scipy.ndimage
 import cv2
 import io
 import ssl
+import time
 
 ssl._create_default_https_context = ssl._create_unverified_context
 
@@ -226,11 +227,39 @@ if st.session_state.current_view == 'grid':
     uploadedDicoms = st.sidebar.file_uploader("Upload DICOM file(s)", key="gridDicomUploader", accept_multiple_files=True)
     if uploadedDicoms:
         import tempfile
-        for uploadedDicom in uploadedDicoms:
-            tmpPath = os.path.join(tempfile.gettempdir(), uploadedDicom.name)
-            with open(tmpPath, "wb") as f:
-                f.write(uploadedDicom.getbuffer())
-            st.session_state.dicom_registry[uploadedDicom.name] = tmpPath
+        new_files = [f for f in uploadedDicoms if f.name not in st.session_state.dicom_registry]
+        if new_files:
+            total_bytes = sum(f.size for f in new_files)
+            processed_bytes = 0
+            _t0 = time.time()
+            _prog = st.sidebar.progress(0, text="Przetwarzanie plików…")
+            for uploadedDicom in new_files:
+                tmpPath = os.path.join(tempfile.gettempdir(), uploadedDicom.name)
+                with open(tmpPath, "wb") as f:
+                    f.write(uploadedDicom.getbuffer())
+                st.session_state.dicom_registry[uploadedDicom.name] = tmpPath
+                processed_bytes += uploadedDicom.size
+                pct = processed_bytes / total_bytes if total_bytes > 0 else 1.0
+                elapsed = time.time() - _t0
+                if pct > 0 and elapsed > 0:
+                    eta = elapsed / pct * (1.0 - pct)
+                    if eta >= 60:
+                        eta_str = f"~{eta/60:.0f} min pozostało"
+                    else:
+                        eta_str = f"~{eta:.0f} s pozostało"
+                else:
+                    eta_str = ""
+                _prog.progress(
+                    min(pct, 1.0),
+                    text=f"Przetwarzanie: {processed_bytes/1e6:.1f} / {total_bytes/1e6:.1f} MB  ({pct*100:.0f}%)  {eta_str}"
+                )
+            _prog.progress(1.0, text=f"Gotowe! Wgrano {len(new_files)} plik(ów).")
+        else:
+            for uploadedDicom in uploadedDicoms:
+                tmpPath = os.path.join(tempfile.gettempdir(), uploadedDicom.name)
+                with open(tmpPath, "wb") as f:
+                    f.write(uploadedDicom.getbuffer())
+                st.session_state.dicom_registry[uploadedDicom.name] = tmpPath
 
     if st.sidebar.button("🔃 Sortuj sekwencje", use_container_width=True, key="sidebar_sort_btn"):
         st.session_state._sidebar_sort_requested = True
