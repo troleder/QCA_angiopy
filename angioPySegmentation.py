@@ -230,32 +230,19 @@ if st.session_state.current_view == 'grid':
         new_files = [f for f in uploadedDicoms if f.name not in st.session_state.dicom_registry]
         if new_files:
             total_bytes = sum(f.size for f in new_files)
-            processed_bytes = 0
             _t0 = time.time()
-            _status_placeholder = st.sidebar.empty()
+            processed_bytes = 0
 
-            for idx, uploadedDicom in enumerate(new_files):
-                tmpPath = os.path.join(tempfile.gettempdir(), uploadedDicom.name)
-                with open(tmpPath, "wb") as f:
-                    f.write(uploadedDicom.getbuffer())
-                st.session_state.dicom_registry[uploadedDicom.name] = tmpPath
-                processed_bytes += uploadedDicom.size
-                pct = min(1.0, processed_bytes / total_bytes if total_bytes > 0 else 1.0)
-                elapsed = time.time() - _t0
+            with st.sidebar.spinner(f"📥 Przetwarzanie {len(new_files)} plik(ów)…"):
+                for uploadedDicom in new_files:
+                    tmpPath = os.path.join(tempfile.gettempdir(), uploadedDicom.name)
+                    with open(tmpPath, "wb") as f:
+                        f.write(uploadedDicom.getbuffer())
+                    st.session_state.dicom_registry[uploadedDicom.name] = tmpPath
+                    processed_bytes += uploadedDicom.size
 
-                if pct > 0.01 and elapsed > 0:
-                    eta_secs = (elapsed / pct - elapsed)
-                    if eta_secs >= 60:
-                        eta_str = f"~{eta_secs/60:.0f}m"
-                    else:
-                        eta_str = f"~{eta_secs:.0f}s"
-                else:
-                    eta_str = ""
-
-                msg = f"📥 {pct*100:.0f}%  •  {processed_bytes/1e6:.1f}/{total_bytes/1e6:.1f} MB  •  {eta_str}"
-                _status_placeholder.info(msg)
-
-            _status_placeholder.success(f"✅ Wgrano {len(new_files)} plik(ów)")
+            elapsed = time.time() - _t0
+            st.sidebar.success(f"✅ Wgrano {len(new_files)} plik(ów) ({total_bytes/1e6:.1f} MB) w {elapsed:.1f}s")
 
     if st.sidebar.button("🔃 Sortuj sekwencje", use_container_width=True, key="sidebar_sort_btn"):
         st.session_state._sidebar_sort_requested = True
