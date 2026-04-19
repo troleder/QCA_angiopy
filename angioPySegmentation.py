@@ -676,7 +676,8 @@ if selectedDicom is not None:
                 c_head1, c_head2 = st.columns([3, 1])
                 c_head1.caption("Zaznacz dwa punkty (początek i koniec) wzdłuż cewnika, aby wyznaczyć odcinek do kalibracji.")
                 if c_head2.button("🔄 Redo Calib"):
-                    for k in ["calibPoints", "mmPerPixelCalib", "calibLinePx", "canvas_calib_dots_v2"]:
+                    for k in ["calibPoints", "mmPerPixelCalib", "calibLinePx",
+                              "canvas_calib_dots_v2", "calib_raw_clicks", "last_calib_click_hash"]:
                         if k in st.session_state:
                             del st.session_state[k]
                     st.rerun()
@@ -703,139 +704,146 @@ if selectedDicom is not None:
                             cv2.line(calibBgFrame, (int(pt1[0]-dx), int(pt1[1]-dy)), (int(pt1[0]+dx), int(pt1[1]+dy)), (255, 0, 0), 1)
                             cv2.line(calibBgFrame, (int(pt2[0]-dx), int(pt2[1]-dy)), (int(pt2[0]+dx), int(pt2[1]+dy)), (255, 0, 0), 1)
 
-                st.image(calibBgFrame, use_column_width=True)
+                # ── Plotly click interaction (replaces st_canvas) ─────────────
+                if 'calib_raw_clicks' not in st.session_state:
+                    st.session_state['calib_raw_clicks'] = []
 
-                calibDotCanvas = st_canvas(
-                    fill_color="#00000000",
-                    stroke_width=0,
-                    stroke_color="#00000000",
-                    background_color='#00000000',
-                    update_streamlit=True,
-                    height=512,
-                    width=512,
-                    drawing_mode="point",
-                    point_display_radius=0,
-                    key="canvas_calib_dots_v2",
-                )
+                raw_calib = st.session_state['calib_raw_clicks']
+                calib_display = calibBgFrame.copy()
+                for i, (px_x, px_y) in enumerate(raw_calib):
+                    cv2.circle(calib_display, (px_x, px_y), 6, (255, 50, 50), -1)
+                    cv2.putText(calib_display, str(i+1), (px_x+7, px_y-7),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 50, 50), 2)
 
-                if calibDotCanvas.json_data is not None:
-                    dotObjs = pd.json_normalize(calibDotCanvas.json_data["objects"])
-                    if len(dotObjs) >= 2 and "left" in dotObjs.columns:
-                        detectedDiameters = []
-                        calibPoints = []
-                        def get_subpixel_peak(idx, array):
-                            if idx == 0 or idx == len(array) - 1: return float(idx)
-                            alpha, beta, gamma = array[idx-1], array[idx], array[idx+1]
-                            denom = 2 * (alpha - 2*beta + gamma)
-                            return float(idx) if denom == 0 else idx + (alpha - gamma) / denom
+                fig_calib = px.imshow(calib_display)
+                fig_calib.update_layout(height=512, margin=dict(l=0, r=0, t=0, b=0), dragmode=False)
+                fig_calib.update_xaxes(showticklabels=False, range=[0, 512])
+                fig_calib.update_yaxes(showticklabels=False, range=[512, 0])
 
-                        cx1 = int(float(dotObjs.iloc[0].get("left", 0)) + 5)
-                        cy1 = int(float(dotObjs.iloc[0].get("top",  0)) + 5)
-                        cx2 = int(float(dotObjs.iloc[1].get("left", 0)) + 5)
-                        cy2 = int(float(dotObjs.iloc[1].get("top",  0)) + 5)
+                clicked_calib = plotly_events(fig_calib, click_event=True, key="calib_plotly_ev")
+                if clicked_calib:
+                    nx = max(0, min(511, int(clicked_calib[0].get('x', 0))))
+                    ny = max(0, min(511, int(clicked_calib[0].get('y', 0))))
+                    if (nx, ny) != st.session_state.get('last_calib_click_hash'):
+                        st.session_state['last_calib_click_hash'] = (nx, ny)
+                        if len(raw_calib) < 2:
+                            raw_calib.append((nx, ny))
+                        st.rerun()
+
+                if len(raw_calib) >= 2:
+                    detectedDiameters = []
+                    calibPoints = []
+                    def get_subpixel_peak(idx, array):
+                        if idx == 0 or idx == len(array) - 1: return float(idx)
+                        alpha, beta, gamma = array[idx-1], array[idx], array[idx+1]
+                        denom = 2 * (alpha - 2*beta + gamma)
+                        return float(idx) if denom == 0 else idx + (alpha - gamma) / denom
+
+                    cx1, cy1 = raw_calib[0]
+                    cx2, cy2 = raw_calib[1]
+
+                    cx1, cy1 = max(0, min(511, cx1)), max(0, min(511, cy1))
+                    cx2, cy2 = max(0, min(511, cx2)), max(0, min(511, cy2))
                         
-                        cx1, cy1 = max(0, min(511, cx1)), max(0, min(511, cy1))
-                        cx2, cy2 = max(0, min(511, cx2)), max(0, min(511, cy2))
+                    dx = cx2 - cx1
+                    dy = cy2 - cy1
+                    dist = numpy.hypot(dx, dy)
+                    tube_theta = numpy.arctan2(dy, dx)
+                    
+                    if dist > 5:
+                        # 1. Estimate base diameter at the middle to know how far out to look
+                        mid_cx = (cx1 + cx2) / 2
+                        mid_cy = (cy1 + cy2) / 2
+                        cs_theta_init = tube_theta - numpy.pi/2
+                        base_t = numpy.arange(-60, 60)
                         
-                        dx = cx2 - cx1
-                        dy = cy2 - cy1
-                        dist = numpy.hypot(dx, dy)
-                        tube_theta = numpy.arctan2(dy, dx)
+                        tx = mid_cx + base_t * numpy.cos(cs_theta_init)
+                        ty = mid_cy + base_t * numpy.sin(cs_theta_init)
+                        coords = numpy.vstack((ty, tx))
+                        profile = scipy.ndimage.map_coordinates(selectedFrame.astype(float), coords, mode='nearest')
+                        smoothed = numpy.convolve(profile, numpy.ones(3)/3.0, mode='same')
+                        grad = numpy.abs(numpy.gradient(smoothed))
                         
-                        if dist > 5:
-                            # 1. Estimate base diameter at the middle to know how far out to look
-                            mid_cx = (cx1 + cx2) / 2
-                            mid_cy = (cy1 + cy2) / 2
-                            cs_theta_init = tube_theta - numpy.pi/2
-                            base_t = numpy.arange(-60, 60)
+                        bestDiam = 15 # fallback diameter in pixels
+                        if grad.max() > 0:
+                            peaks = scipy.signal.find_peaks(grad, height=grad.max()*0.25, distance=4)[0]
+                            if len(peaks) >= 2:
+                                top2 = numpy.argsort(grad[peaks])[-2:]
+                                bestDiam = abs(get_subpixel_peak(max(peaks[top2]), grad) - get_subpixel_peak(min(peaks[top2]), grad))
+                        
+                        # 2. Track exactly along the vector from point 1 to point 2
+                        num_steps = max(2, int(dist / 5))
+                        
+                        lw, rw = [], []
+                        caxis = tube_theta
+                        
+                        mid_x1, mid_y1, mid_x2, mid_y2 = None, None, None, None
+                        
+                        for step in range(num_steps + 1):
+                            frac = step / float(num_steps)
+                            ccx = cx1 + frac * dx
+                            ccy = cy1 + frac * dy
                             
-                            tx = mid_cx + base_t * numpy.cos(cs_theta_init)
-                            ty = mid_cy + base_t * numpy.sin(cs_theta_init)
-                            coords = numpy.vstack((ty, tx))
-                            profile = scipy.ndimage.map_coordinates(selectedFrame.astype(float), coords, mode='nearest')
-                            smoothed = numpy.convolve(profile, numpy.ones(3)/3.0, mode='same')
-                            grad = numpy.abs(numpy.gradient(smoothed))
+                            cs_theta = caxis - numpy.pi/2
+                            track_L = max(15, int(bestDiam * 1.5))
+                            track_t = numpy.arange(-track_L, track_L)
+                            tx = ccx + track_t * numpy.cos(cs_theta)
+                            ty = ccy + track_t * numpy.sin(cs_theta)
+                            t_coords = numpy.vstack((ty, tx))
+                            t_prof = scipy.ndimage.map_coordinates(selectedFrame.astype(float), t_coords, mode='nearest')
+                            t_smooth = numpy.convolve(t_prof, numpy.ones(3)/3.0, mode='same')
+                            t_grad = numpy.abs(numpy.gradient(t_smooth))
                             
-                            bestDiam = 15 # fallback diameter in pixels
-                            if grad.max() > 0:
-                                peaks = scipy.signal.find_peaks(grad, height=grad.max()*0.25, distance=4)[0]
-                                if len(peaks) >= 2:
-                                    top2 = numpy.argsort(grad[peaks])[-2:]
-                                    bestDiam = abs(get_subpixel_peak(max(peaks[top2]), grad) - get_subpixel_peak(min(peaks[top2]), grad))
-                            
-                            # 2. Track exactly along the vector from point 1 to point 2
-                            num_steps = max(2, int(dist / 5))
-                            
-                            lw, rw = [], []
-                            caxis = tube_theta
-                            
-                            mid_x1, mid_y1, mid_x2, mid_y2 = None, None, None, None
-                            
-                            for step in range(num_steps + 1):
-                                frac = step / float(num_steps)
-                                ccx = cx1 + frac * dx
-                                ccy = cy1 + frac * dy
+                            if t_grad.max() == 0: continue
+                            t_peaks = scipy.signal.find_peaks(t_grad, height=t_grad.max()*0.20, distance=max(2, int(bestDiam*0.5)))[0]
+                            if len(t_peaks) >= 2:
+                                t_idx = numpy.argsort(t_grad[t_peaks])[-2:]
+                                tp0, tp1 = min(t_peaks[t_idx]), max(t_peaks[t_idx])
+                                sp0 = get_subpixel_peak(tp0, t_grad)
+                                sp1 = get_subpixel_peak(tp1, t_grad)
+                                cur_diam = sp1 - sp0
+                                detectedDiameters.append(cur_diam)
                                 
-                                cs_theta = caxis - numpy.pi/2
-                                track_L = max(15, int(bestDiam * 1.5))
-                                track_t = numpy.arange(-track_L, track_L)
-                                tx = ccx + track_t * numpy.cos(cs_theta)
-                                ty = ccy + track_t * numpy.sin(cs_theta)
-                                t_coords = numpy.vstack((ty, tx))
-                                t_prof = scipy.ndimage.map_coordinates(selectedFrame.astype(float), t_coords, mode='nearest')
-                                t_smooth = numpy.convolve(t_prof, numpy.ones(3)/3.0, mode='same')
-                                t_grad = numpy.abs(numpy.gradient(t_smooth))
+                                woff_0 = -track_L + sp0
+                                woff_1 = -track_L + sp1
+                                wx0 = ccx + woff_0 * numpy.cos(cs_theta)
+                                wy0 = ccy + woff_0 * numpy.sin(cs_theta)
+                                wx1 = ccx + woff_1 * numpy.cos(cs_theta)
+                                wy1 = ccy + woff_1 * numpy.sin(cs_theta)
+                                lw.append((wx0, wy0))
+                                rw.append((wx1, wy1))
                                 
-                                if t_grad.max() == 0: continue
-                                t_peaks = scipy.signal.find_peaks(t_grad, height=t_grad.max()*0.20, distance=max(2, int(bestDiam*0.5)))[0]
-                                if len(t_peaks) >= 2:
-                                    t_idx = numpy.argsort(t_grad[t_peaks])[-2:]
-                                    tp0, tp1 = min(t_peaks[t_idx]), max(t_peaks[t_idx])
-                                    sp0 = get_subpixel_peak(tp0, t_grad)
-                                    sp1 = get_subpixel_peak(tp1, t_grad)
-                                    cur_diam = sp1 - sp0
-                                    detectedDiameters.append(cur_diam)
-                                    
-                                    woff_0 = -track_L + sp0
-                                    woff_1 = -track_L + sp1
-                                    wx0 = ccx + woff_0 * numpy.cos(cs_theta)
-                                    wy0 = ccy + woff_0 * numpy.sin(cs_theta)
-                                    wx1 = ccx + woff_1 * numpy.cos(cs_theta)
-                                    wy1 = ccy + woff_1 * numpy.sin(cs_theta)
-                                    lw.append((wx0, wy0))
-                                    rw.append((wx1, wy1))
-                                    
-                                    if step == num_steps // 2:
-                                        mid_x1, mid_y1, mid_x2, mid_y2 = wx0, wy0, wx1, wy1
+                                if step == num_steps // 2:
+                                    mid_x1, mid_y1, mid_x2, mid_y2 = wx0, wy0, wx1, wy1
+                        
+                        if lw and rw:
+                            avg_diam = numpy.mean(detectedDiameters) if detectedDiameters else bestDiam
+                            mid_lw = lw[len(lw)//2]
+                            mid_rw = rw[len(rw)//2]
+                            mid_cx = (mid_lw[0] + mid_rw[0]) / 2.0
+                            mid_cy = (mid_lw[1] + mid_rw[1]) / 2.0
+                            cs_theta = tube_theta - numpy.pi/2
+                            gx1 = mid_cx - (avg_diam/2.0) * numpy.cos(cs_theta)
+                            gy1 = mid_cy - (avg_diam/2.0) * numpy.sin(cs_theta)
+                            gx2 = mid_cx + (avg_diam/2.0) * numpy.cos(cs_theta)
+                            gy2 = mid_cy + (avg_diam/2.0) * numpy.sin(cs_theta)
                             
-                            if lw and rw:
-                                avg_diam = numpy.mean(detectedDiameters) if detectedDiameters else bestDiam
-                                mid_lw = lw[len(lw)//2]
-                                mid_rw = rw[len(rw)//2]
-                                mid_cx = (mid_lw[0] + mid_rw[0]) / 2.0
-                                mid_cy = (mid_lw[1] + mid_rw[1]) / 2.0
-                                cs_theta = tube_theta - numpy.pi/2
-                                gx1 = mid_cx - (avg_diam/2.0) * numpy.cos(cs_theta)
-                                gy1 = mid_cy - (avg_diam/2.0) * numpy.sin(cs_theta)
-                                gx2 = mid_cx + (avg_diam/2.0) * numpy.cos(cs_theta)
-                                gy2 = mid_cy + (avg_diam/2.0) * numpy.sin(cs_theta)
-                                
-                                calibPoints.append({
-                                    'ref': ((int(gx1), int(gy1)), (int(gx2), int(gy2))),
-                                    'left_wall': lw,
-                                    'right_wall': rw,
-                                    'diam': avg_diam
-                                })
+                            calibPoints.append({
+                                'ref': ((int(gx1), int(gy1)), (int(gx2), int(gy2))),
+                                'left_wall': lw,
+                                'right_wall': rw,
+                                'diam': avg_diam
+                            })
 
-                        if detectedDiameters:
-                            avgDiam = numpy.mean([p['diam'] for p in calibPoints])
-                            st.session_state["mmPerPixelCalib"] = 1.98 / avgDiam
-                            st.session_state["calibLinePx"]     = avgDiam
-                            
-                            # Uruchomienie odświeżenia widoku lewego natychmiast po znalezieniu nowych ścian
-                            if st.session_state.get("calibPoints") != calibPoints:
-                                st.session_state["calibPoints"] = calibPoints
-                                st.rerun()
+                    if detectedDiameters:
+                        avgDiam = numpy.mean([p['diam'] for p in calibPoints])
+                        st.session_state["mmPerPixelCalib"] = 1.98 / avgDiam
+                        st.session_state["calibLinePx"]     = avgDiam
+                        
+                        # Uruchomienie odświeżenia widoku lewego natychmiast po znalezieniu nowych ścian
+                        if st.session_state.get("calibPoints") != calibPoints:
+                            st.session_state["calibPoints"] = calibPoints
+                            st.rerun()
 
                 # Show calibration status
                 mmPerPixelCalib = st.session_state.get("mmPerPixelCalib", None)
@@ -852,25 +860,35 @@ if selectedDicom is not None:
             else:
                 a_head1, a_head2 = st.columns([3, 1])
                 a_head1.caption("Click along the artery from start to end — aim for 5–10 points.")
+                annot_click_key = f"annot_clicks_{dicomLabel}"
                 if a_head2.button("🔄 Redo Segment"):
-                    seg_key = "canvas_seg_" + str(dicomLabel)
-                    if seg_key in st.session_state:
-                        del st.session_state[seg_key]
+                    for k in [annot_click_key, f"last_annot_hash_{dicomLabel}"]:
+                        if k in st.session_state:
+                            del st.session_state[k]
                     st.rerun()
-                st.image(selectedFrameRGB, use_column_width=True)
 
-                annotationCanvas = st_canvas(
-                    fill_color="red",
-                    stroke_width=2,
-                    stroke_color="red",
-                    background_color='#00000000',
-                    update_streamlit=True,
-                    height=512,
-                    width=512,
-                    drawing_mode="point",
-                    point_display_radius=2,
-                    key="canvas_seg_" + str(dicomLabel),
-                )
+                if annot_click_key not in st.session_state:
+                    st.session_state[annot_click_key] = []
+
+                annot_clicks = st.session_state[annot_click_key]
+                annot_display = selectedFrameRGB.copy()
+                for i, (ax, ay) in enumerate(annot_clicks):
+                    cv2.circle(annot_display, (ax, ay), 4, (255, 50, 50), -1)
+
+                fig_annot = px.imshow(annot_display)
+                fig_annot.update_layout(height=512, margin=dict(l=0, r=0, t=0, b=0), dragmode=False)
+                fig_annot.update_xaxes(showticklabels=False, range=[0, 512])
+                fig_annot.update_yaxes(showticklabels=False, range=[512, 0])
+
+                clicked_annot = plotly_events(fig_annot, click_event=True, key=f"annot_plotly_{dicomLabel}")
+                if clicked_annot:
+                    nx = max(0, min(511, int(clicked_annot[0].get('x', 0))))
+                    ny = max(0, min(511, int(clicked_annot[0].get('y', 0))))
+                    last_hash_key = f"last_annot_hash_{dicomLabel}"
+                    if (nx, ny) != st.session_state.get(last_hash_key):
+                        st.session_state[last_hash_key] = (nx, ny)
+                        annot_clicks.append((nx, ny))
+                        st.rerun()
 
                 # Show calibration status in annotation mode too
                 mmPerPixelCalib = st.session_state.get("mmPerPixelCalib", None)
@@ -885,19 +903,12 @@ if selectedDicom is not None:
                         st.info("ℹ️ No calibration yet. Switch to 📏 mode to calibrate.")
 
                 # ── Annotation logic ──────────────────────────────────────────
-                if annotationCanvas.json_data is not None:
-                    objects = pd.json_normalize(annotationCanvas.json_data["objects"])
+                if len(annot_clicks) > 0:
+                    groundTruthPoints = numpy.array(
+                        [[ay, ax + 3.5] for ax, ay in annot_clicks]
+                    )
 
-                    if len(objects) != 0:
-                        for c in objects.select_dtypes(include=['object']).columns:
-                            objects[c] = objects[c].astype("str")
-
-                        groundTruthPoints = numpy.vstack((
-                            numpy.array(objects['top']),
-                            numpy.array(objects['left'] + 3.5)
-                        )).T
-
-                        with st.spinner(f"Running segmentation on {len(objects)} points (30–60 s on CPU)…"):
+                    with st.spinner(f"Running segmentation on {len(annot_clicks)} points (30–60 s on CPU)…"):
                             try:
                                 mask = angioPyFunctions.arterySegmentation(
                                     selectedFrame,
