@@ -630,6 +630,9 @@ if selectedDicom is not None:
             slice_ix = 0
             
         predictedMask = numpy.zeros_like(pixelArray[slice_ix, :, :])
+        _mask_key = f"predicted_mask_{dicomLabel}_{slice_ix}"
+        if _mask_key in st.session_state:
+            predictedMask = st.session_state[_mask_key]
 
     with stepTwo:
         meta = st.session_state.dicom_metadata.get(st.session_state.dicomLabel, {}) if "dicomLabel" in st.session_state else {}
@@ -861,8 +864,9 @@ if selectedDicom is not None:
                 a_head1, a_head2 = st.columns([3, 1])
                 a_head1.caption("Click along the artery from start to end — aim for 5–10 points.")
                 annot_click_key = f"annot_clicks_{dicomLabel}"
+                _mask_key_redo = f"predicted_mask_{dicomLabel}_{slice_ix}"
                 if a_head2.button("🔄 Redo Segment"):
-                    for k in [annot_click_key, f"last_annot_hash_{dicomLabel}"]:
+                    for k in [annot_click_key, f"last_annot_hash_{dicomLabel}", _mask_key_redo]:
                         if k in st.session_state:
                             del st.session_state[k]
                     st.rerun()
@@ -903,19 +907,21 @@ if selectedDicom is not None:
                         st.info("ℹ️ No calibration yet. Switch to 📏 mode to calibrate.")
 
                 # ── Annotation logic ──────────────────────────────────────────
+                _mask_key = f"predicted_mask_{dicomLabel}_{slice_ix}"
                 if len(annot_clicks) > 0:
-                    groundTruthPoints = numpy.array(
-                        [[ay, ax + 3.5] for ax, ay in annot_clicks]
-                    )
-
-                    with st.spinner(f"Running segmentation on {len(annot_clicks)} points (30–60 s on CPU)…"):
+                    if st.button("▶ Run Segmentation", key=f"run_seg_{dicomLabel}"):
+                        groundTruthPoints = numpy.array(
+                            [[ay, ax + 3.5] for ax, ay in annot_clicks]
+                        )
+                        with st.spinner(f"Running segmentation on {len(annot_clicks)} points (30–60 s on CPU)…"):
                             try:
                                 mask = angioPyFunctions.arterySegmentation(
                                     selectedFrame,
                                     groundTruthPoints,
                                 )
-                                predictedMask = predict.CoronaryDataset.mask2image(mask)
-                                predictedMask = numpy.array(predictedMask)
+                                _pm = predict.CoronaryDataset.mask2image(mask)
+                                predictedMask = numpy.array(_pm)
+                                st.session_state[_mask_key] = predictedMask
                             except Exception as segErr:
                                 st.error(f"Segmentation error: {segErr}")
 
