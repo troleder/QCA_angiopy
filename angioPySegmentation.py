@@ -730,7 +730,7 @@ if selectedDicom is not None:
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 50, 50), 2)
 
                 fig_calib = px.imshow(calib_display)
-                fig_calib.update_layout(height=600, margin=dict(l=0, r=0, t=0, b=0), dragmode=False,
+                fig_calib.update_layout(height=600, width=600, margin=dict(l=0, r=0, t=0, b=0), dragmode=False,
                     hoverlabel=dict(bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)",
                                     font=dict(color="rgba(0,0,0,0)")))
                 fig_calib.update_traces(hovertemplate="<extra></extra>")
@@ -894,7 +894,7 @@ if selectedDicom is not None:
                     cv2.circle(annot_display, (ax, ay), 4, (255, 50, 50), -1)
 
                 fig_annot = px.imshow(annot_display)
-                fig_annot.update_layout(height=600, margin=dict(l=0, r=0, t=0, b=0), dragmode=False,
+                fig_annot.update_layout(height=600, width=600, margin=dict(l=0, r=0, t=0, b=0), dragmode=False,
                     hoverlabel=dict(bgcolor="rgba(0,0,0,0)", bordercolor="rgba(0,0,0,0)",
                                     font=dict(color="rgba(0,0,0,0)")))
                 fig_annot.update_traces(hovertemplate="<extra></extra>")
@@ -967,12 +967,12 @@ if selectedDicom is not None:
                             dx, dy = L_w * numpy.cos(tube_theta), L_w * numpy.sin(tube_theta)
                             cv2.line(calibShowFrame, (int(pt1[0]-dx), int(pt1[1]-dy)), (int(pt1[0]+dx), int(pt1[1]+dy)), (255, 0, 0), 1)
                             cv2.line(calibShowFrame, (int(pt2[0]-dx), int(pt2[1]-dy)), (int(pt2[0]+dx), int(pt2[1]+dy)), (255, 0, 0), 1)
-                st.image(calibShowFrame, use_column_width=True)
+                st.image(calibShowFrame, width=600)
             else:
                 _mask_preview_key = f"predicted_mask_{dicomLabel}_{slice_ix}"
                 if _mask_preview_key not in st.session_state:
                     st.info("Click points on the artery in the left panel, then click **▶ Run Segmentation**.")
-                    st.image(selectedFrameRGB, use_column_width=True)
+                    st.image(selectedFrameRGB, width=600)
                 st.markdown("<h5 style='text-align:center; color:white;'>🔍 Zoom & Mask Correction</h5>", unsafe_allow_html=True)
                 
                 col_z1, col_z2, col_z3 = st.columns(3)
@@ -1095,7 +1095,7 @@ if selectedDicom is not None:
 
                 viewport_overlay = base_overlay[top_y:top_y+h_z, left_x:left_x+w_z]
 
-                st.image(viewport_overlay, use_column_width=True)
+                st.image(viewport_overlay, width=600)
 
                 maskCanvas = st_canvas(
                     fill_color="rgba(255,255,255,0.0)",
