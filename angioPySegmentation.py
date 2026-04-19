@@ -335,6 +335,16 @@ if st.session_state.current_view == 'grid':
     if len(st.session_state.patient_cart) > 0:
         st.markdown("---")
         st.success(f"🛒 **{len(st.session_state.patient_cart)} sequence(s) analyzed** and saved to the Patient Master Report Cart.")
+        if "_last_pdf_buf" in st.session_state and "_last_xlsx_buf" in st.session_state:
+            _g1, _g2 = st.columns(2)
+            _g_pdf_name  = st.session_state["_last_pdf_name"]
+            _g_xlsx_name = _g_pdf_name.replace(".pdf", ".xlsx")
+            _g1.download_button("⬇ Download PDF", data=st.session_state["_last_pdf_buf"],
+                file_name=_g_pdf_name, mime="application/pdf", use_container_width=True)
+            _g2.download_button("⬇ Download Excel", data=st.session_state["_last_xlsx_buf"],
+                file_name=_g_xlsx_name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True)
         import io
         from matplotlib.backends.backend_pdf import PdfPages
         from matplotlib.figure import Figure
