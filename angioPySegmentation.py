@@ -596,6 +596,18 @@ if "dicomDropDown" not in st.session_state:
 stepOne = st.sidebar.expander("STEP ONE", True)
 stepTwo = st.sidebar.expander("STEP TWO", True)
 
+with st.sidebar.expander("📁 Output folder", False):
+    _default_folder = os.path.expanduser("~/Desktop/AngioPy/")
+    if "output_folder" not in st.session_state:
+        st.session_state["output_folder"] = _default_folder
+    st.session_state["output_folder"] = st.text_input(
+        "Folder path for PDF & Excel",
+        value=st.session_state["output_folder"],
+        help="Reports and Excel database will be saved here. On Streamlit Cloud use the download buttons instead.",
+        key="output_folder_input"
+    )
+    st.caption("Set once — applies to all saves in this session.")
+
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 tab1, tab2 = st.tabs(["Segmentation", "Analysis"])
 
@@ -1472,6 +1484,17 @@ if selectedDicom is not None:
             if not has_pid:
                 st.error("🚨 Brak Patient ID! Uzupełnij pole powyżej, aby móc zapisać analizę.")
             
+            _out_folder_display = st.session_state.get("output_folder", "~/Desktop/AngioPy/")
+            st.caption(f"📁 Output folder: `{_out_folder_display}`")
+
+            if "_last_pdf_buf" in st.session_state:
+                _dl1, _dl2 = st.columns(2)
+                _dl1.download_button("⬇ Download PDF", data=st.session_state["_last_pdf_buf"],
+                    file_name=st.session_state.get("_last_pdf_name", "report.pdf"), mime="application/pdf", use_container_width=True)
+                if "_last_xlsx_buf" in st.session_state:
+                    _dl2.download_button("⬇ Download Excel", data=st.session_state["_last_xlsx_buf"],
+                        file_name="AngioPy.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+
             if st.button("💾 Save to Patient Report Cart", use_container_width=True, disabled=not has_pid):
                 try:
                     _, _, _, tfc, timi_calc, just = analyze_series_flow(selectedDicom, os.path.getsize(selectedDicom))
@@ -1519,9 +1542,9 @@ if selectedDicom is not None:
                     import matplotlib.pyplot as plt
                     from matplotlib.backends.backend_pdf import PdfPages
                     import os
-                    save_dir = os.path.expanduser("~/Library/Mobile Documents/com~apple~CloudDocs/AngioPy/")
+                    save_dir = os.path.expanduser(st.session_state.get("output_folder", "~/Desktop/AngioPy/"))
                     os.makedirs(save_dir, exist_ok=True)
-                    
+
                     safe_patient_id = st.session_state.patient_id if st.session_state.patient_id else "NoID"
                     pdf_filename = f"{safe_patient_id}_{meta['vessel']}_{meta['phase']}.pdf"
                     pdf_path = os.path.join(save_dir, pdf_filename)
@@ -1566,14 +1589,18 @@ if selectedDicom is not None:
                         ax.axis('off')
                         pdf.savefig(fig_pdf)
                         plt.close(fig_pdf)
+                    _pdf_buf = io.BytesIO(open(pdf_path, 'rb').read())
+                    st.session_state["_last_pdf_buf"] = _pdf_buf
+                    st.session_state["_last_pdf_name"] = pdf_filename
                 except Exception as e:
-                    pass
-                
+                    st.warning(f"PDF not saved to disk: {e}")
+
                 try:
                     import pandas as pd
                     import os
-                    
-                    target_xlsx = os.path.expanduser("~/Library/Mobile Documents/com~apple~CloudDocs/AngioPy/AngioPy.xlsx")
+
+                    save_dir_xlsx = os.path.expanduser(st.session_state.get("output_folder", "~/Desktop/AngioPy/"))
+                    target_xlsx = os.path.join(save_dir_xlsx, "AngioPy.xlsx")
                     
                     row = {
                         "Patient ID": safe_patient_id, 
@@ -1608,9 +1635,13 @@ if selectedDicom is not None:
                         df_final = df_new
                         
                     df_final.to_excel(target_xlsx, index=False)
+                    _xlsx_buf = io.BytesIO()
+                    df_final.to_excel(_xlsx_buf, index=False)
+                    _xlsx_buf.seek(0)
+                    st.session_state["_last_xlsx_buf"] = _xlsx_buf
                 except Exception as e:
-                    pass
-                
+                    st.warning(f"Excel not saved to disk: {e}")
+
                 st.session_state.patient_cart.append(cart_item)
                 st.session_state.current_view = 'grid'
                 st.rerun()
