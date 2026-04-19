@@ -1554,7 +1554,7 @@ if selectedDicom is not None:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True, key="dl_xlsx_top")
 
-            if st.button("💾 Save to Patient Report Cart", use_container_width=True, disabled=not has_pid):
+            if st.button("✅ Finish Analysis", use_container_width=True, disabled=not has_pid):
                 try:
                     _, _, _, tfc, timi_calc, just = analyze_series_flow(selectedDicom, os.path.getsize(selectedDicom))
                 except:
@@ -1677,3 +1677,5 @@ if selectedDicom is not None:
                     st.error(f"Excel error: {e}")
 
                 st.session_state.patient_cart.append(cart_item)
+                st.session_state.current_view = 'grid'
+                st.rerun()
